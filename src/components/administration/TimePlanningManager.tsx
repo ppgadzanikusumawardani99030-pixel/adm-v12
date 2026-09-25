@@ -321,26 +321,34 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         setTimeout(() => setSaveNotification(null), 3500);
       }
     } else {
-      // Local unresolved: keep unresolved workflow and trigger online discovery
+      // Local unresolved: keep unresolved workflow
       setWorkflowStatus('UNRESOLVED');
       setResolutionStatus(res.resolutionStatus);
       setResolutionMessage(res.diagnostic);
 
       const semNum = semester === '1' ? 1 : semester === '2' ? 2 : null;
-      if (academicYear && semNum) {
+      const prov = selectedProvince || school.province;
+
+      // Online search strictly if and only if UNVERIFIED_SOURCE and province + academicYear + semester are present
+      if (
+        res.resolutionStatus === 'UNVERIFIED_SOURCE' &&
+        academicYear &&
+        semNum &&
+        prov
+      ) {
         setIsOnlineSearching(true);
         setOnlineSearchError(null);
         try {
           const onlineRes = await resolveCalendarOnline({
             academicYear,
             semester: semNum,
-            province: selectedProvince || school.province || undefined,
+            province: prov,
             regency: school.regency || undefined,
           });
 
           if (onlineRes.status === 'PARTIALLY_RESOLVED' && onlineRes.selectedSource) {
             setOnlineDiscovery(onlineRes.selectedSource);
-            // CRITICAL: DO NOT automatically create or save AcademicCalendar!
+            // CRITICAL POLICY: PARTIAL is strictly READ-ONLY. DO NOT mutate AcademicCalendar, dates, or save!
             if (showNotification) {
               setSaveNotification('Sumber resmi ditemukan online — perlu verifikasi');
               setTimeout(() => setSaveNotification(null), 4000);
@@ -359,6 +367,8 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           setIsOnlineSearching(false);
         }
       } else {
+        // For REGION_REQUIRED, ACADEMIC_YEAR_REQUIRED, SEMESTER_REQUIRED: no online search
+        setOnlineDiscovery(null);
         if (showNotification) {
           setSaveNotification(res.diagnostic);
           setTimeout(() => setSaveNotification(null), 4000);
@@ -862,70 +872,46 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           </div>
         </div>
 
-        {/* ONLINE DISCOVERY BANNER (PARTIAL SOURCE) */}
+        {/* ONLINE DISCOVERY BANNER (PARTIAL SOURCE - READ ONLY) */}
         {onlineDiscovery && resolutionStatus !== 'RESOLVED' && (
           <div
             id="online-calendar-discovery-card"
-            className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs text-amber-950"
+            className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-3 text-xs text-amber-950"
           >
-            <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-bold text-amber-900">
-                    Sumber resmi ditemukan online — perlu verifikasi
-                  </span>
-                  <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded font-semibold text-[10px]">
-                    {onlineDiscovery.sourceLevel}
-                  </span>
-                  <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-mono text-[10px]">
-                    STATUS: {onlineDiscovery.verificationStatus}
-                  </span>
-                </div>
-                <div className="text-slate-700 text-[11px] space-y-0.5">
-                  <p>
-                    <strong>Otoritas:</strong> {onlineDiscovery.authority}
-                  </p>
-                  <p>
-                    <strong>Dokumen:</strong> {onlineDiscovery.documentTitle}
-                    {onlineDiscovery.documentNumber ? ` (${onlineDiscovery.documentNumber})` : ''}
-                  </p>
-                  <p className="flex items-center gap-1">
-                    <strong>Sumber Resmi:</strong>{' '}
-                    <a
-                      href={onlineDiscovery.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-indigo-700 underline font-mono inline-flex items-center gap-1 hover:text-indigo-900"
-                    >
-                      {onlineDiscovery.sourceUrl}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </p>
-                  {(onlineDiscovery.semesterStartDate || onlineDiscovery.semesterEndDate) && (
-                    <p className="text-slate-600">
-                      <strong>Estimasi Rentang:</strong> {onlineDiscovery.semesterStartDate || '-'} s/d{' '}
-                      {onlineDiscovery.semesterEndDate || '-'}
-                    </p>
-                  )}
-                </div>
+            <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1.5 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-amber-900">
+                  Sumber resmi ditemukan online — perlu verifikasi
+                </span>
+                <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded font-semibold text-[10px]">
+                  {onlineDiscovery.sourceLevel}
+                </span>
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-mono text-[10px]">
+                  STATUS: {onlineDiscovery.verificationStatus}
+                </span>
               </div>
-            </div>
-            <div className="shrink-0 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onlineDiscovery.semesterStartDate) setStartDate(onlineDiscovery.semesterStartDate);
-                  if (onlineDiscovery.semesterEndDate) setEndDate(onlineDiscovery.semesterEndDate);
-                  if (onlineDiscovery.authority) setSourceAuthority(onlineDiscovery.authority);
-                  if (onlineDiscovery.documentTitle) setSourceName(onlineDiscovery.documentTitle);
-                  if (onlineDiscovery.documentNumber) setSourceDocumentNumber(onlineDiscovery.documentNumber);
-                  if (onlineDiscovery.sourceUrl) setSourceUrl(onlineDiscovery.sourceUrl);
-                }}
-                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition-colors shadow-2xs"
-              >
-                Gunakan Nilai Acuan
-              </button>
+              <div className="text-slate-700 text-[11px] space-y-0.5">
+                <p>
+                  <strong>Otoritas:</strong> {onlineDiscovery.authority}
+                </p>
+                <p>
+                  <strong>Dokumen:</strong> {onlineDiscovery.documentTitle}
+                  {onlineDiscovery.documentNumber ? ` (${onlineDiscovery.documentNumber})` : ''}
+                </p>
+                <p className="flex items-center gap-1">
+                  <strong>Sumber Resmi:</strong>{' '}
+                  <a
+                    href={onlineDiscovery.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-700 underline font-mono inline-flex items-center gap-1 hover:text-indigo-900"
+                  >
+                    {onlineDiscovery.sourceUrl}
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </p>
+              </div>
             </div>
           </div>
         )}

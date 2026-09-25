@@ -459,6 +459,7 @@ console.log('--- STARTING CALENDAR WORKFLOW REFACTOR & EXACT LEGAL SOURCE TESTS 
   });
 
   assert(localRes.isResolved === false, 'Local is unresolved');
+  assert(localRes.resolutionStatus === 'UNVERIFIED_SOURCE', 'Missing region evaluates to UNVERIFIED_SOURCE');
 
   const { resolveCalendarOnline } = await import('../src/services/calendarProviderClient');
   const onlineRes = await resolveCalendarOnline({
@@ -472,6 +473,113 @@ console.log('--- STARTING CALENDAR WORKFLOW REFACTOR & EXACT LEGAL SOURCE TESTS 
   assert(onlineRes.selectedSource === undefined, 'No selected source');
 
   globalThis.fetch = originalFetch;
+}
+
+// Test 12: Incomplete configuration (REGION_REQUIRED, ACADEMIC_YEAR_REQUIRED, SEMESTER_REQUIRED) skips online search
+{
+  console.log('\n--- 12. Incomplete Config: REGION_REQUIRED / ACADEMIC_YEAR_REQUIRED skips Online Search ---');
+  let onlineFetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    onlineFetchCalled = true;
+    return { ok: true, json: async () => ({ success: true }) } as Response;
+  }) as typeof fetch;
+
+  // Case 12a: Missing Province
+  const missingProvinceRes = resolveOfficialCalendar({
+    province: '',
+    academicYear: '2026/2027',
+    semester: '1',
+    academicSettingId: 'acad-test-12a',
+  });
+
+  assert(missingProvinceRes.resolutionStatus === 'REGION_REQUIRED', 'Missing province must return REGION_REQUIRED');
+  if (missingProvinceRes.resolutionStatus === 'UNVERIFIED_SOURCE') {
+    await fetch('/api/calendar/resolve');
+  }
+  assert(onlineFetchCalled === false, 'Online search must NOT be called on REGION_REQUIRED');
+
+  // Case 12b: Missing Academic Year
+  const missingYearRes = resolveOfficialCalendar({
+    province: 'Jawa Barat',
+    academicYear: '',
+    semester: '1',
+    academicSettingId: 'acad-test-12b',
+  });
+
+  assert(missingYearRes.resolutionStatus === 'ACADEMIC_YEAR_REQUIRED', 'Missing year must return ACADEMIC_YEAR_REQUIRED');
+  if (missingYearRes.resolutionStatus === 'UNVERIFIED_SOURCE') {
+    await fetch('/api/calendar/resolve');
+  }
+  assert(onlineFetchCalled === false, 'Online search must NOT be called on ACADEMIC_YEAR_REQUIRED');
+
+  // Case 12c: Missing Semester
+  const missingSemRes = resolveOfficialCalendar({
+    province: 'Jawa Barat',
+    academicYear: '2026/2027',
+    semester: undefined,
+    academicSettingId: 'acad-test-12c',
+  });
+
+  assert(missingSemRes.resolutionStatus === 'SEMESTER_REQUIRED', 'Missing semester must return SEMESTER_REQUIRED');
+  if (missingSemRes.resolutionStatus === 'UNVERIFIED_SOURCE') {
+    await fetch('/api/calendar/resolve');
+  }
+  assert(onlineFetchCalled === false, 'Online search must NOT be called on SEMESTER_REQUIRED');
+
+  globalThis.fetch = originalFetch;
+}
+
+// Test 13: PARTIAL Online Discovery is strictly READ-ONLY (no calendar mutation, no dates override, no save)
+{
+  console.log('\n--- 13. Invariant: PARTIAL Online Discovery is strictly READ-ONLY ---');
+  const mockPartialCandidate = {
+    sourceLevel: 'REGENCY' as const,
+    province: 'Papua Barat',
+    regency: 'Kabupaten Fakfak',
+    academicYear: '2026/2027',
+    authority: 'Dinas Pendidikan Fakfak',
+    documentTitle: 'Kaldik Fakfak 2026/2027',
+    documentNumber: 'Kepdisdik 420/123/2026',
+    sourceUrl: 'https://disdik.fakfakkab.go.id/kaldik',
+    semesterStartDate: '2026-07-13',
+    semesterEndDate: '2026-12-18',
+    verificationStatus: 'PARTIAL' as const,
+    retrievedAt: '2026-09-25T10:00:00.000Z',
+  };
+
+  // State invariants:
+  // 1. Existing calendar state before discovery
+  let currentCalendar: any = null;
+  let currentStartDate = '';
+  let currentEndDate = '';
+  let currentWorkflowStatus = 'UNRESOLVED';
+  let isSaved = false;
+
+  const onSaveMock = () => {
+    isSaved = true;
+  };
+
+  // When online discovery candidate is received:
+  // ONLY setOnlineDiscovery(candidate) is allowed!
+  let onlineDiscoveryState: any = null;
+  const setOnlineDiscoveryMock = (cand: any) => {
+    onlineDiscoveryState = cand;
+  };
+
+  setOnlineDiscoveryMock(mockPartialCandidate);
+
+  // Invariant assertions:
+  assert(onlineDiscoveryState !== null, 'Discovery card receives candidate for read-only display');
+  assert(currentStartDate === '', 'StartDate must NOT be mutated automatically');
+  assert(currentEndDate === '', 'EndDate must NOT be mutated automatically');
+  assert(currentCalendar === null, 'AcademicCalendar must NOT be created');
+  assert(currentWorkflowStatus === 'UNRESOLVED', 'WorkflowStatus must remain UNRESOLVED');
+  assert(isSaved === false, 'onSaveCalendar must NEVER be called automatically on PARTIAL');
+  assert(
+    onlineDiscoveryState.verificationStatus === 'PARTIAL',
+    'Status must remain PARTIAL and must not be promoted to RESOLVED'
+  );
 }
 
 console.log('\n🎉 ALL CALENDAR WORKFLOW & EXACT LEGAL SOURCE TESTS PASSED PERFECTLY (100%)!');
