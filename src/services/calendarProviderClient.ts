@@ -56,9 +56,15 @@ export async function resolveCalendarOnline(
     }
 
     const data = await response.json();
-    if (data && data.success && data.resolution && typeof data.resolution.status === 'string') {
+    const rawStatus = data?.resolution?.status;
+    const isValidStatus =
+      rawStatus === 'RESOLVED' ||
+      rawStatus === 'PARTIALLY_RESOLVED' ||
+      rawStatus === 'UNRESOLVED';
+
+    if (data && data.success && data.resolution && isValidStatus) {
       return {
-        status: data.resolution.status,
+        status: rawStatus,
         selectedSource: data.resolution.selectedSource,
         candidates: Array.isArray(data.resolution.candidates) ? data.resolution.candidates : [],
         resolvedLevel: data.resolution.resolvedLevel,

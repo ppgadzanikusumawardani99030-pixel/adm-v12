@@ -189,6 +189,44 @@ async function main() {
   });
 
   // =========================================================================
+  // TEST 4B: Client rejects invalid resolution status (e.g. BROKEN) -> UNRESOLVED
+  // =========================================================================
+  await runTest('4B. Invalid resolution status: Rejects invalid status like BROKEN and fails closed to UNRESOLVED', async () => {
+    globalThis.fetch = (async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          resolution: {
+            status: 'BROKEN',
+            candidates: [
+              {
+                sourceLevel: 'REGENCY',
+                academicYear: '2026/2027',
+                authority: 'Bad Source',
+                documentTitle: 'Bad Title',
+                sourceUrl: 'https://bad.go.id',
+                verificationStatus: 'PARTIAL',
+                retrievedAt: '2026-09-25T10:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const resBroken = await resolveCalendarOnline({
+      academicYear: '2026/2027',
+      semester: 1,
+    });
+
+    assert.strictEqual(resBroken.status, 'UNRESOLVED');
+    assert.deepStrictEqual(resBroken.candidates, []);
+    assert.strictEqual(resBroken.selectedSource, undefined);
+  });
+
+  // =========================================================================
   // TEST 5: Backend Endpoint Resolution Logic: Grounded provider integrated with selectBestCalendarSource
   // =========================================================================
   await runTest('5. Backend contract logic: GroundedCalendarSearchProvider integrates with selectBestCalendarSource', async () => {
