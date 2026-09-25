@@ -62,7 +62,6 @@ export type AcademicEntityKind =
   | 'CURRICULUM_CONTEXT'
   | 'ANNUAL_JP_REFERENCE'
   | 'ACADEMIC_CALENDAR'
-  | 'CALENDAR'
   | 'TIME_ALLOCATION'
   | 'PROMES'
   | 'LEARNING_PLAN'
@@ -90,7 +89,6 @@ const ACADEMIC_ENTITY_SCOPE_MAP: Record<AcademicEntityKind, AcademicScopeType> =
 
   // Semester (SEMESTER) Scope:
   ACADEMIC_CALENDAR: 'SEMESTER',
-  CALENDAR: 'SEMESTER',
   TIME_ALLOCATION: 'SEMESTER',
   PROMES: 'SEMESTER',
   LEARNING_PLAN: 'SEMESTER',

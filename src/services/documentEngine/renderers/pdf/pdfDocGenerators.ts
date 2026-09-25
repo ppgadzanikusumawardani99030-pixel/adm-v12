@@ -143,9 +143,9 @@ export async function generatePdfDocument(
             it.competence || 'Kompetensi',
             it.contentScope || 'Lingkup Materi',
             it.statement || 'Pernyataan TP',
-            (it.p3Dimensions || []).join(', ') || 'Mandiri, Bernalar Kritis',
+            (it.p3Dimensions || []).join(', ') || '-',
           ])
-        : [[1, 'Menyimak/Membaca', 'Memahami', 'Teks Narasi', 'Peserta didik mampu memahami ide pokok teks narasi', 'Bernalar Kritis']];
+        : [[1, '—', '—', '—', 'Belum ada data analisis CP ke Tujuan Pembelajaran', '—']];
 
       sections.push({
         type: 'table',
@@ -164,7 +164,7 @@ export async function generatePdfDocument(
 
     case 'TP': {
       title = 'Dokumen Perumusan Tujuan Pembelajaran (TP)';
-      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — Semester ${semester}`;
+      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — Tahun Ajaran ${academicYear}`;
       fileName = `Tujuan_Pembelajaran_${cleanSubject}_${cleanGrade}.pdf`;
 
       sections.push({
@@ -186,7 +186,7 @@ export async function generatePdfDocument(
             it.code || `TP ${idx + 1}`,
             it.statement || '-',
             it.contentScope || '-',
-            (it.p3Dimensions || []).join(', ') || 'Bernalar Kritis',
+            (it.p3Dimensions || []).join(', ') || '-',
           ]);
 
       sections.push({
@@ -205,7 +205,14 @@ export async function generatePdfDocument(
 
     case 'ATP': {
       title = 'Alur Tujuan Pembelajaran (ATP)';
-      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — Alokasi: ${atp?.totalJP || 72} JP`;
+      const atpItemsList = atp?.items || [];
+      const calculatedTotalJP = atpItemsList.reduce((acc, curr) => acc + (Number(curr.allocatedJP ?? curr.jp) || 0), 0);
+      const totalJPText = atp?.totalJP != null
+        ? `${atp.totalJP} JP`
+        : calculatedTotalJP > 0
+        ? `${calculatedTotalJP} JP`
+        : 'Belum ditetapkan';
+      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — Total Alokasi: ${totalJPText}`;
       fileName = `ATP_${cleanSubject}_${cleanGrade}.pdf`;
       orientation = 'landscape';
 
@@ -239,16 +246,20 @@ export async function generatePdfDocument(
             '....................',
             '....................',
           ])
-        : (atp?.items || []).map((it, idx) => [
-            it.stepNumber || idx + 1,
-            it.tpCode || `TP ${idx + 1}`,
-            it.tpStatement || '-',
-            it.materialScope || '-',
-            `${it.jp || 6} JP`,
-            (it.p3Dimensions || []).join(', ') || 'Bernalar Kritis',
-            it.assessmentPlan || 'Formatif & Sumatif',
-            it.glossary || '-',
-          ]);
+        : atpItemsList.map((it, idx) => {
+            const itJp = it.allocatedJP ?? it.jp;
+            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+            return [
+              it.stepNumber || idx + 1,
+              it.tpCode || `TP ${idx + 1}`,
+              it.tpStatement || '-',
+              it.materialScope || '-',
+              itJpDisplay,
+              (it.p3Dimensions || []).join(', ') || '-',
+              it.assessmentPlan || '-',
+              it.glossary || '-',
+            ];
+          });
 
       sections.push({
         type: 'table',
@@ -281,14 +292,18 @@ export async function generatePdfDocument(
             '....................',
             '..... JP',
           ])
-        : (atp?.items || []).map((it, idx) => [
-            idx + 1,
-            semester,
-            it.tpCode || `TP ${idx + 1}`,
-            it.tpStatement || '-',
-            it.materialScope || '-',
-            `${it.jp || 6} JP`,
-          ]);
+        : (atp?.items || []).map((it, idx) => {
+            const itJp = it.allocatedJP ?? it.jp;
+            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+            return [
+              idx + 1,
+              semester,
+              it.tpCode || `TP ${idx + 1}`,
+              it.tpStatement || '-',
+              it.materialScope || '-',
+              itJpDisplay,
+            ];
+          });
 
       sections.push({
         type: 'table',
@@ -320,14 +335,18 @@ export async function generatePdfDocument(
             '..... JP',
             '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
           ])
-        : (atp?.items || []).map((it, idx) => [
-            idx + 1,
-            it.tpCode || `TP ${idx + 1}`,
-            it.tpStatement || '-',
-            it.materialScope || '-',
-            `${it.jp || 6} JP`,
-            'v', '', '', '', 'v', '', '', '', 'v', '', '', '', 'v', '', '', '',
-          ]);
+        : (atp?.items || []).map((it, idx) => {
+            const itJp = it.allocatedJP ?? it.jp;
+            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+            return [
+              idx + 1,
+              it.tpCode || `TP ${idx + 1}`,
+              it.tpStatement || '-',
+              it.materialScope || '-',
+              itJpDisplay,
+              'v', '', '', '', 'v', '', '', '', 'v', '', '', '', 'v', '', '', '',
+            ];
+          });
 
       sections.push({
         type: 'table',
@@ -569,13 +588,14 @@ export async function generatePdfDocument(
           ])
         : studentList.map((st, idx) => {
             const studentResults = resultsList.filter((r) => r.studentId === st.id);
-            const avgScore = studentResults.length > 0
+            const hasResults = studentResults.length > 0;
+            const avgScore = hasResults
               ? Math.round(studentResults.reduce((acc, curr) => acc + curr.score, 0) / studentResults.length)
-              : 80;
-            const tp1Score = studentResults[0]?.score ?? avgScore;
-            const tp2Score = studentResults[1]?.score ?? avgScore;
-            const tp3Score = studentResults[2]?.score ?? avgScore;
-            const sasScore = studentResults[3]?.score ?? avgScore;
+              : null;
+            const tp1Score = studentResults[0]?.score ?? (avgScore !== null ? avgScore : '-');
+            const tp2Score = studentResults[1]?.score ?? (avgScore !== null ? avgScore : '-');
+            const tp3Score = studentResults[2]?.score ?? (avgScore !== null ? avgScore : '-');
+            const sasScore = studentResults[3]?.score ?? (avgScore !== null ? avgScore : '-');
 
             return [
               idx + 1,
@@ -586,8 +606,8 @@ export async function generatePdfDocument(
               tp2Score,
               tp3Score,
               sasScore,
-              avgScore,
-              avgScore >= 75 ? 'Tercapai' : 'Perlu Bimbingan',
+              avgScore !== null ? avgScore : '-',
+              avgScore !== null ? (avgScore >= 75 ? 'Tercapai' : 'Perlu Bimbingan') : 'Belum Ada Nilai',
             ];
           });
 
@@ -633,15 +653,18 @@ export async function generatePdfDocument(
             const iCount = studentRecs.filter((r) => r.status === 'I').length;
             const aCount = studentRecs.filter((r) => r.status === 'A').length;
             const total = studentRecs.length;
-            const hCount = total > 0 ? studentRecs.filter((r) => r.status === 'H' || r.status === 'D').length : 12;
-            const pct = total > 0 ? `${Math.round((hCount / total) * 100)}%` : '100%';
+            const hCount = total > 0 ? studentRecs.filter((r) => r.status === 'H' || r.status === 'D').length : 0;
+            const pct = total > 0 ? `${Math.round((hCount / total) * 100)}%` : '-';
+            const presenceMarks = total > 0
+              ? Array.from({ length: 12 }, (_, pIdx) => studentRecs[pIdx]?.status || '-')
+              : Array.from({ length: 12 }, () => '-');
 
             return [
               idx + 1,
               st.nisn || '-',
               st.name,
               st.gender || 'L',
-              'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H',
+              ...presenceMarks,
               sCount, iCount, aCount, pct,
             ];
           });
@@ -697,12 +720,7 @@ export async function generatePdfDocument(
             d.notes || '-',
           ])
         : [
-            [1, '13 Juli 2026', 'Kegiatan Sekolah', 'Hari Pertama Masuk Sekolah / MPLS'],
-            [2, '17 Agustus 2026', 'Hari Libur', 'HUT Kemerdekaan RI Ke-81'],
-            [3, '21 September 2026', 'Kegiatan Sekolah', 'Penilaian Tengah Semester (PTS/STS)'],
-            [4, '25 November 2026', 'Kegiatan Sekolah', 'Hari Guru Nasional'],
-            [5, '07 Desember 2026', 'Kegiatan Sekolah', 'Penilaian Akhir Semester (PAS/SAS)'],
-            [6, '19 Desember 2026', 'Kegiatan Sekolah', 'Pembagian Rapor Semester 1'],
+            [1, '—', '—', 'Belum ada agenda kalender akademik yang ditetapkan'],
           ];
 
       sections.push({
@@ -741,18 +759,22 @@ export async function generatePdfDocument(
               matchingTp?.code || `TP ${idx + 1}`,
               matchingTp?.contentScope || matchingTp?.statement || a.notes || 'Materi Pokok',
               a.weekNumber ? `Pekan ke-${a.weekNumber}` : '1 Pekan Efektif',
-              `${a.jp || 4} JP`,
+              a.jp != null ? `${a.jp} JP` : '—',
               a.notes || `${a.monthName || 'Bulan Berjalan'} - Tatap Muka`,
             ];
           })
-        : (atp?.items || []).map((it, idx) => [
-            idx + 1,
-            it.tpCode || `TP ${idx + 1}`,
-            it.materialScope || it.tpStatement,
-            '2 Pekan Efektif',
-            `${it.jp || 6} JP`,
-            `Minggu ke-${idx * 2 + 1} s.d ${idx * 2 + 2}`,
-          ]);
+        : (atp?.items || []).map((it, idx) => {
+            const itJp = it.allocatedJP ?? it.jp;
+            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+            return [
+              idx + 1,
+              it.tpCode || `TP ${idx + 1}`,
+              it.materialScope || it.tpStatement || '-',
+              'Pekan Efektif',
+              itJpDisplay,
+              `Minggu ke-${idx * 2 + 1} s.d ${idx * 2 + 2}`,
+            ];
+          });
 
       sections.push({
         type: 'table',
@@ -841,18 +863,8 @@ export async function generatePdfDocument(
               r.status === 'completed' ? 'Tuntas' : 'Berjalan',
             ];
           })
-        : (context.students || []).length > 0
-        ? (context.students || []).slice(0, 2).map((st, idx) => [
-            idx + 1,
-            st.name,
-            'TP 1.1',
-            'Perlu Bimbingan',
-            'Bimbingan Terbimbing Guru / Tutor Sebaya',
-            78,
-            'Berjalan',
-          ])
         : [
-            [1, 'Belum ada data remedial', '-', '-', '-', '-', '-'],
+            [1, 'Belum ada data remedial', '—', '—', '—', '—', '—'],
           ];
 
       sections.push({

@@ -80,6 +80,9 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
       .filter(Boolean)
       .join('\n');
 
+    const itJp = item.allocatedJP ?? item.jp;
+    const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+
     return new TableRow({
       children: [
         createTableDataCell(`${item.stepNumber || index + 1}`, 6, AlignmentType.CENTER),
@@ -97,7 +100,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
           ],
         }),
         createTableDataCell(item.materialScope || '-', 20),
-        createTableDataCell(`${item.jp || 0} JP`, 10, AlignmentType.CENTER, true),
+        createTableDataCell(itJpDisplay, 10, AlignmentType.CENTER, true),
         createTableDataCell(p3List, 18),
         createTableDataCell(assessAndGloss || '-', 18),
       ],
@@ -105,7 +108,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
   });
 
   // Total JP Row
-  const totalJP = (atp?.items || []).reduce((acc, curr) => acc + (Number(curr.jp) || 0), 0);
+  const totalJP = (atp?.items || []).reduce((acc, curr) => acc + (Number(curr.allocatedJP ?? curr.jp) || 0), 0);
   const totalRow = new TableRow({
     children: [
       new TableCell({
@@ -118,7 +121,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
             spacing: { line: 240, after: 0 },
             children: [
               new TextRun({
-                text: 'TOTAL ALOKASI WAKTU SEMESTER: ',
+                text: 'TOTAL ALOKASI WAKTU: ',
                 bold: true,
                 size: 20,
                 font: DOCX_FONT,
@@ -128,7 +131,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
           }),
         ],
       }),
-      createTableDataCell(`${totalJP} JP`, 10, AlignmentType.CENTER, true),
+      createTableDataCell(totalJP > 0 ? `${totalJP} JP` : '—', 10, AlignmentType.CENTER, true),
       new TableCell({
         width: { size: 36, type: WidthType.PERCENTAGE },
         columnSpan: 2,

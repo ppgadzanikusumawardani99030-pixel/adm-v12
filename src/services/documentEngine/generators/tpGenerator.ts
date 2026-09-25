@@ -103,10 +103,10 @@ export async function generateTP(
         new TableRow({
           children: [
             createTableDataCell('1', 5, AlignmentType.CENTER),
-            createTableDataCell('TP 1', 12, AlignmentType.CENTER, true),
-            createTableDataCell('Peserta didik mampu memahami dan menguasai kompetensi dasar.', 47, AlignmentType.JUSTIFIED),
-            createTableDataCell('Materi Pokok', 20, AlignmentType.LEFT),
-            createTableDataCell('Bernalar Kritis, Mandiri', 16, AlignmentType.LEFT),
+            createTableDataCell('-', 12, AlignmentType.CENTER),
+            createTableDataCell('Belum ada Tujuan Pembelajaran yang dirumuskan.', 47, AlignmentType.LEFT),
+            createTableDataCell('-', 20, AlignmentType.CENTER),
+            createTableDataCell('-', 16, AlignmentType.CENTER),
           ],
         })
       );

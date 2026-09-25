@@ -202,7 +202,6 @@ runTest('Academic Entity Scope Matrix: Annual entities resolve to YEAR', () => {
 runTest('Academic Entity Scope Matrix: Semester entities resolve to SEMESTER', () => {
   const semesterEntities: AcademicEntityKind[] = [
     'ACADEMIC_CALENDAR',
-    'CALENDAR',
     'TIME_ALLOCATION',
     'PROMES',
     'LEARNING_PLAN',
