@@ -4,6 +4,12 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { OfficialEducationDataProvider } from './server/schoolProvider';
+import { GroundedCalendarSearchProvider } from './server/calendarProvider';
+import {
+  selectBestCalendarSource,
+  evaluateCalendarCandidate,
+  CalendarSearchRequest,
+} from './src/services/calendarProvider';
 import {
   fallbackAnalyzeCP,
   fallbackRefineText,
@@ -363,6 +369,76 @@ app.post('/api/schools/resolve-principal', async (req, res) => {
       verificationStatus: 'unverified',
       message: 'Gagal menghubungi layanan verifikasi kepala sekolah saat ini.',
       error: message,
+    });
+  }
+});
+
+// Grounded Calendar Online Resolution Endpoint
+app.post('/api/calendar/resolve', async (req, res) => {
+  const { academicYear, semester, province, regency } = req.body || {};
+
+  // 1. Validation error -> HTTP 400
+  if (!academicYear || typeof academicYear !== 'string' || academicYear.trim() === '') {
+    return res.status(400).json({
+      success: false,
+      error: 'Tahun ajaran (academicYear) wajib diisi.',
+    });
+  }
+
+  const semNum = Number(semester);
+  if (semNum !== 1 && semNum !== 2) {
+    return res.status(400).json({
+      success: false,
+      error: 'Semester wajib bernilai 1 atau 2.',
+    });
+  }
+
+  const searchRequest: CalendarSearchRequest = {
+    academicYear: academicYear.trim(),
+    semester: semNum as 1 | 2,
+    province: typeof province === 'string' && province.trim() ? province.trim() : undefined,
+    regency: typeof regency === 'string' && regency.trim() ? regency.trim() : undefined,
+  };
+
+  try {
+    const provider = new GroundedCalendarSearchProvider();
+    const candidates = await provider.search(searchRequest);
+
+    const selectedSource = selectBestCalendarSource(candidates, searchRequest);
+
+    if (!selectedSource) {
+      return res.json({
+        success: true,
+        resolution: {
+          status: 'UNRESOLVED',
+          selectedSource: undefined,
+          candidates,
+          resolvedLevel: undefined,
+        },
+      });
+    }
+
+    const status = evaluateCalendarCandidate(selectedSource);
+
+    return res.json({
+      success: true,
+      resolution: {
+        status,
+        selectedSource,
+        candidates,
+        resolvedLevel: selectedSource.sourceLevel,
+      },
+    });
+  } catch (error: unknown) {
+    console.error('Error in /api/calendar/resolve:', error);
+    const message = error instanceof Error ? error.message : 'Gagal memproses resolusi kalender pendidikan';
+    return res.status(500).json({
+      success: false,
+      error: message,
+      resolution: {
+        status: 'UNRESOLVED',
+        candidates: [],
+      },
     });
   }
 });
