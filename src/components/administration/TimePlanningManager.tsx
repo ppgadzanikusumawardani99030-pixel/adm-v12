@@ -31,6 +31,8 @@ import {
   generateKalenderAkademik,
   generateAlokasiWaktu,
 } from '../../services/documentEngine';
+import { resolveCalendarOnline } from '../../services/calendarProviderClient';
+import { CalendarSourceCandidate } from '../../services/calendarProvider';
 import {
   Clock,
   Calendar as CalendarIcon,
@@ -161,6 +163,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [resolutionMessage, setResolutionMessage] = useState<string | null>(null);
 
+  // Online Discovery & Resolution State
+  const [onlineDiscovery, setOnlineDiscovery] = useState<CalendarSourceCandidate | null>(null);
+  const [isOnlineSearching, setIsOnlineSearching] = useState<boolean>(false);
+  const [onlineSearchError, setOnlineSearchError] = useState<string | null>(null);
+
   // Auto-resolve on initialization if calendar is empty or unconfigured
   useEffect(() => {
     if (
@@ -277,7 +284,8 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   // =========================================================================
 
   // Step 1: AUTO RESOLVE
-  const handleAutoResolve = (showNotification: boolean = true) => {
+  const handleAutoResolve = async (showNotification: boolean = true) => {
+    // 1. Resolve local official static calendar first
     const res = resolveOfficialCalendar({
       province: selectedProvince,
       academicYear,
@@ -289,6 +297,9 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     });
 
     if (res.isResolved && res.calendar) {
+      // Local source resolved: keep existing flow and do not perform online search
+      setOnlineDiscovery(null);
+      setOnlineSearchError(null);
       setStartDate(res.calendar.startDate);
       setEndDate(res.calendar.endDate);
       setSchoolDaysPerWeek(res.calendar.schoolDaysPerWeek || 5);
@@ -310,12 +321,48 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         setTimeout(() => setSaveNotification(null), 3500);
       }
     } else {
+      // Local unresolved: keep unresolved workflow and trigger online discovery
       setWorkflowStatus('UNRESOLVED');
       setResolutionStatus(res.resolutionStatus);
       setResolutionMessage(res.diagnostic);
-      if (showNotification) {
-        setSaveNotification(res.diagnostic);
-        setTimeout(() => setSaveNotification(null), 4000);
+
+      const semNum = semester === '1' ? 1 : semester === '2' ? 2 : null;
+      if (academicYear && semNum) {
+        setIsOnlineSearching(true);
+        setOnlineSearchError(null);
+        try {
+          const onlineRes = await resolveCalendarOnline({
+            academicYear,
+            semester: semNum,
+            province: selectedProvince || school.province || undefined,
+            regency: school.regency || undefined,
+          });
+
+          if (onlineRes.status === 'PARTIALLY_RESOLVED' && onlineRes.selectedSource) {
+            setOnlineDiscovery(onlineRes.selectedSource);
+            // CRITICAL: DO NOT automatically create or save AcademicCalendar!
+            if (showNotification) {
+              setSaveNotification('Sumber resmi ditemukan online — perlu verifikasi');
+              setTimeout(() => setSaveNotification(null), 4000);
+            }
+          } else {
+            setOnlineDiscovery(null);
+            if (showNotification) {
+              setSaveNotification(res.diagnostic);
+              setTimeout(() => setSaveNotification(null), 4000);
+            }
+          }
+        } catch (err: any) {
+          setOnlineSearchError(err?.message || 'Gagal melakukan pencarian kalender online');
+          setOnlineDiscovery(null);
+        } finally {
+          setIsOnlineSearching(false);
+        }
+      } else {
+        if (showNotification) {
+          setSaveNotification(res.diagnostic);
+          setTimeout(() => setSaveNotification(null), 4000);
+        }
       }
     }
   };
@@ -814,6 +861,88 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
             )}
           </div>
         </div>
+
+        {/* ONLINE DISCOVERY BANNER (PARTIAL SOURCE) */}
+        {onlineDiscovery && resolutionStatus !== 'RESOLVED' && (
+          <div
+            id="online-calendar-discovery-card"
+            className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs text-amber-950"
+          >
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-amber-900">
+                    Sumber resmi ditemukan online — perlu verifikasi
+                  </span>
+                  <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded font-semibold text-[10px]">
+                    {onlineDiscovery.sourceLevel}
+                  </span>
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-mono text-[10px]">
+                    STATUS: {onlineDiscovery.verificationStatus}
+                  </span>
+                </div>
+                <div className="text-slate-700 text-[11px] space-y-0.5">
+                  <p>
+                    <strong>Otoritas:</strong> {onlineDiscovery.authority}
+                  </p>
+                  <p>
+                    <strong>Dokumen:</strong> {onlineDiscovery.documentTitle}
+                    {onlineDiscovery.documentNumber ? ` (${onlineDiscovery.documentNumber})` : ''}
+                  </p>
+                  <p className="flex items-center gap-1">
+                    <strong>Sumber Resmi:</strong>{' '}
+                    <a
+                      href={onlineDiscovery.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-700 underline font-mono inline-flex items-center gap-1 hover:text-indigo-900"
+                    >
+                      {onlineDiscovery.sourceUrl}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </p>
+                  {(onlineDiscovery.semesterStartDate || onlineDiscovery.semesterEndDate) && (
+                    <p className="text-slate-600">
+                      <strong>Estimasi Rentang:</strong> {onlineDiscovery.semesterStartDate || '-'} s/d{' '}
+                      {onlineDiscovery.semesterEndDate || '-'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="shrink-0 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onlineDiscovery.semesterStartDate) setStartDate(onlineDiscovery.semesterStartDate);
+                  if (onlineDiscovery.semesterEndDate) setEndDate(onlineDiscovery.semesterEndDate);
+                  if (onlineDiscovery.authority) setSourceAuthority(onlineDiscovery.authority);
+                  if (onlineDiscovery.documentTitle) setSourceName(onlineDiscovery.documentTitle);
+                  if (onlineDiscovery.documentNumber) setSourceDocumentNumber(onlineDiscovery.documentNumber);
+                  if (onlineDiscovery.sourceUrl) setSourceUrl(onlineDiscovery.sourceUrl);
+                }}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition-colors shadow-2xs"
+              >
+                Gunakan Nilai Acuan
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isOnlineSearching && (
+          <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center gap-2 text-xs text-indigo-800 animate-pulse">
+            <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+            <span>Mencari sumber kalender pendidikan resmi secara online...</span>
+          </div>
+        )}
+
+        {onlineSearchError && (
+          <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-2 text-xs text-rose-800">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{onlineSearchError}</span>
+          </div>
+        )}
 
         {/* Quick KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">

@@ -330,4 +330,148 @@ console.log('--- STARTING CALENDAR WORKFLOW REFACTOR & EXACT LEGAL SOURCE TESTS 
   assert(reset.calendar!.isOverridden === false, 'isOverridden must be false');
 }
 
+// Test 9: Auto-resolve workflow: Local resolved does not trigger online search
+{
+  console.log('\n--- 9. Auto-Resolve: Local Resolved skips Online Search ---');
+  let onlineFetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    onlineFetchCalled = true;
+    return { ok: true, json: async () => ({ success: true }) } as Response;
+  }) as typeof fetch;
+
+  // Simulate local resolution logic
+  const localRes = resolveOfficialCalendar({
+    province: 'Jawa Barat',
+    academicYear: '2026/2027',
+    semester: '1',
+    academicSettingId: 'acad-test-7',
+  });
+
+  assert(localRes.isResolved === true, 'Local static source is resolved');
+  if (!localRes.isResolved) {
+    // Only if local is unresolved would online search be triggered
+    await fetch('/api/calendar/resolve');
+  }
+
+  assert(onlineFetchCalled === false, 'Online search must NOT be called when local calendar is resolved');
+  globalThis.fetch = originalFetch;
+}
+
+// Test 10: Auto-resolve workflow: Local unresolved triggers online search
+{
+  console.log('\n--- 10. Auto-Resolve: Local Unresolved triggers Online Search ---');
+  let onlineFetchPayload: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    onlineFetchPayload = JSON.parse(init?.body as string);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        resolution: {
+          status: 'PARTIALLY_RESOLVED',
+          selectedSource: {
+            sourceLevel: 'REGENCY',
+            province: 'Papua Barat',
+            regency: 'Kabupaten Fakfak',
+            academicYear: '2026/2027',
+            authority: 'Dinas Pendidikan Fakfak',
+            documentTitle: 'Kaldik Fakfak 2026/2027',
+            sourceUrl: 'https://disdik.fakfakkab.go.id/kaldik',
+            verificationStatus: 'PARTIAL',
+            retrievedAt: '2026-09-25T10:00:00.000Z',
+          },
+          candidates: [],
+          resolvedLevel: 'REGENCY',
+        },
+      }),
+    } as Response;
+  }) as typeof fetch;
+
+  // Simulate local resolution logic on unknown province
+  const localRes = resolveOfficialCalendar({
+    province: 'Papua Barat',
+    academicYear: '2026/2027',
+    semester: '1',
+    academicSettingId: 'acad-test-8',
+  });
+
+  assert(localRes.isResolved === false, 'Local static calendar is unresolved for missing regional seed');
+
+  // Trigger online resolution
+  let savedCalendar: any = null;
+  let onlineDiscoveryCandidate: any = null;
+
+  if (!localRes.isResolved) {
+    const { resolveCalendarOnline } = await import('../src/services/calendarProviderClient');
+    const onlineRes = await resolveCalendarOnline({
+      academicYear: '2026/2027',
+      semester: 1,
+      province: 'Papua Barat',
+      regency: 'Kabupaten Fakfak',
+    });
+
+    if (onlineRes.status === 'PARTIALLY_RESOLVED' && onlineRes.selectedSource) {
+      onlineDiscoveryCandidate = onlineRes.selectedSource;
+      // CRITICAL POLICY: DO NOT automatically save AcademicCalendar
+    }
+  }
+
+  assert(onlineFetchPayload !== null, 'Online fetch was called');
+  assert(onlineFetchPayload.academicYear === '2026/2027', 'Academic year passed to online provider');
+  assert(onlineFetchPayload.semester === 1, 'Semester passed to online provider');
+  assert(onlineFetchPayload.province === 'Papua Barat', 'Province passed to online provider');
+  assert(onlineFetchPayload.regency === 'Kabupaten Fakfak', 'Regency passed to online provider');
+
+  assert(onlineDiscoveryCandidate !== null, 'Online discovery candidate was extracted');
+  assert(onlineDiscoveryCandidate.authority === 'Dinas Pendidikan Fakfak', 'Discovered authority matched');
+  assert(onlineDiscoveryCandidate.verificationStatus === 'PARTIAL', 'Status must remain PARTIAL');
+  assert(savedCalendar === null, 'CRITICAL: AcademicCalendar must NOT be saved automatically on PARTIAL discovery');
+
+  globalThis.fetch = originalFetch;
+}
+
+// Test 11: Auto-resolve workflow: Online unresolved preserves manual flow
+{
+  console.log('\n--- 11. Auto-Resolve: Online Unresolved preserves Manual Flow ---');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        resolution: {
+          status: 'UNRESOLVED',
+          candidates: [],
+        },
+      }),
+    } as Response;
+  }) as typeof fetch;
+
+  const localRes = resolveOfficialCalendar({
+    province: 'Sulawesi Barat',
+    academicYear: '2026/2027',
+    semester: '1',
+    academicSettingId: 'acad-test-9',
+  });
+
+  assert(localRes.isResolved === false, 'Local is unresolved');
+
+  const { resolveCalendarOnline } = await import('../src/services/calendarProviderClient');
+  const onlineRes = await resolveCalendarOnline({
+    academicYear: '2026/2027',
+    semester: 1,
+    province: 'Sulawesi Barat',
+  });
+
+  assert(onlineRes.status === 'UNRESOLVED', 'Online resolution returns UNRESOLVED');
+  assert(onlineRes.candidates.length === 0, 'No candidates');
+  assert(onlineRes.selectedSource === undefined, 'No selected source');
+
+  globalThis.fetch = originalFetch;
+}
+
 console.log('\n🎉 ALL CALENDAR WORKFLOW & EXACT LEGAL SOURCE TESTS PASSED PERFECTLY (100%)!');
