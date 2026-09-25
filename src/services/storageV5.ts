@@ -45,6 +45,91 @@ export function createInitialStorageV5(): AppStorageStateV5 {
 }
 
 /**
+ * Helper to assert that a property is an array.
+ */
+function assertArray(obj: Record<string, unknown>, key: string, containerName: string): void {
+  if (!Array.isArray(obj[key])) {
+    throw new Error(
+      `Invalid storage format: "${containerName}.${key}" must be an array, received ${typeof obj[
+        key
+      ]}`
+    );
+  }
+}
+
+/**
+ * Helper to assert that a property is a non-null object.
+ */
+function assertObject(
+  obj: Record<string, unknown>,
+  key: string,
+  containerName: string
+): Record<string, unknown> {
+  const val = obj[key];
+  if (!val || typeof val !== 'object' || Array.isArray(val)) {
+    throw new Error(
+      `Invalid storage format: "${containerName}.${key}" must be an object, received ${
+        Array.isArray(val) ? 'array' : typeof val
+      }`
+    );
+  }
+  return val as Record<string, unknown>;
+}
+
+/**
+ * Validates that an unknown value conforms strictly to AppStorageStateV5.
+ * Does not mutate, drop, or normalize fields.
+ */
+export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid storage state: root must be a non-null object');
+  }
+
+  const state = value as Record<string, unknown>;
+
+  if (state.schemaVersion !== 5) {
+    throw new Error(
+      `Invalid schemaVersion: expected 5, received "${String(state.schemaVersion)}"`
+    );
+  }
+
+  // Validate root collection arrays
+  assertArray(state, 'profiles', 'data');
+  assertArray(state, 'schools', 'data');
+  assertArray(state, 'principalHistories', 'data');
+  assertArray(state, 'workspaces', 'data');
+  assertArray(state, 'yearPlans', 'data');
+  assertArray(state, 'semesterPlans', 'data');
+  assertArray(state, 'annualJPReferences', 'data');
+  assertArray(state, 'semesterJPSettings', 'data');
+  assertArray(state, 'documents', 'data');
+
+  // Validate annualData structure & collections
+  const annualData = assertObject(state, 'annualData', 'data');
+  assertArray(annualData, 'cp', 'data.annualData');
+  assertArray(annualData, 'cpAnalysis', 'data.annualData');
+  assertArray(annualData, 'tp', 'data.annualData');
+  assertArray(annualData, 'atp', 'data.annualData');
+  assertArray(annualData, 'curriculumContext', 'data.annualData');
+
+  // Validate semesterData structure & collections
+  const semesterData = assertObject(state, 'semesterData', 'data');
+  assertArray(semesterData, 'academicCalendar', 'data.semesterData');
+  assertArray(semesterData, 'timeAllocation', 'data.semesterData');
+  assertArray(semesterData, 'learningPlan', 'data.semesterData');
+  assertArray(semesterData, 'assessmentCriteria', 'data.semesterData');
+  assertArray(semesterData, 'assessmentPlan', 'data.semesterData');
+  assertArray(semesterData, 'assessmentPackage', 'data.semesterData');
+  assertArray(semesterData, 'roster', 'data.semesterData');
+  assertArray(semesterData, 'attendance', 'data.semesterData');
+  assertArray(semesterData, 'grade', 'data.semesterData');
+  assertArray(semesterData, 'remedial', 'data.semesterData');
+  assertArray(semesterData, 'enrichment', 'data.semesterData');
+
+  return value as AppStorageStateV5;
+}
+
+/**
  * Serializes an AppStorageStateV5 into a canonical V5 backup envelope string.
  */
 export function serializeBackupV5(data: AppStorageStateV5): string {
@@ -68,44 +153,12 @@ export function serializeBackupV5(data: AppStorageStateV5): string {
 }
 
 /**
- * Helper to assert that a property is an array.
- */
-function assertArray(obj: Record<string, unknown>, key: string, containerName: string): void {
-  if (!Array.isArray(obj[key])) {
-    throw new Error(
-      `Invalid backup format: "${containerName}.${key}" must be an array, received ${typeof obj[
-        key
-      ]}`
-    );
-  }
-}
-
-/**
- * Helper to assert that a property is a non-null object.
- */
-function assertObject(
-  obj: Record<string, unknown>,
-  key: string,
-  containerName: string
-): Record<string, unknown> {
-  const val = obj[key];
-  if (!val || typeof val !== 'object' || Array.isArray(val)) {
-    throw new Error(
-      `Invalid backup format: "${containerName}.${key}" must be an object, received ${
-        Array.isArray(val) ? 'array' : typeof val
-      }`
-    );
-  }
-  return val as Record<string, unknown>;
-}
-
-/**
  * Parses and strictly validates a V5 backup envelope string.
  *
  * Strict policy:
  * - Only accepts schemaVersion === 5
  * - Strictly rejects legacy V1/V2/V3/V4 backups without auto-migration
- * - Requires complete canonical root, annualData, and semesterData collections
+ * - Reuses validateStorageStateV5 to ensure 100% consistent validation
  * - Preserves all collections and fields losslessly without discarding or normalizing payload
  */
 export function parseBackupV5(jsonString: string): AppStorageStateV5 {
@@ -152,48 +205,58 @@ export function parseBackupV5(jsonString: string): AppStorageStateV5 {
     throw new Error('Invalid backup format: data payload is missing or invalid');
   }
 
-  const state = envelope.data as Record<string, unknown>;
+  return validateStorageStateV5(envelope.data);
+}
 
-  if (state.schemaVersion !== 5) {
+/**
+ * Saves an AppStorageStateV5 to localStorage under STORAGE_KEY_V5.
+ * Validates the state before writing.
+ */
+export function saveStorageV5(state: AppStorageStateV5): void {
+  const validated = validateStorageStateV5(state);
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY_V5, JSON.stringify(validated));
+  }
+}
+
+/**
+ * Loads AppStorageStateV5 from localStorage.
+ *
+ * Rules:
+ * - If V5 key is missing -> creates initial storage, saves it to V5 key, returns initial.
+ * - If V5 key exists but JSON is malformed or schema is invalid -> throws without resetting/overwriting raw data.
+ * - Never reads or touches legacy storage keys.
+ */
+export function loadStorageV5(): AppStorageStateV5 {
+  if (typeof localStorage === 'undefined') {
+    return createInitialStorageV5();
+  }
+
+  const raw = localStorage.getItem(STORAGE_KEY_V5);
+  if (raw === null) {
+    const initial = createInitialStorageV5();
+    saveStorageV5(initial);
+    return initial;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: any) {
     throw new Error(
-      `Inner data payload schemaVersion mismatch: expected 5, received "${String(
-        state.schemaVersion
-      )}"`
+      `Corrupted V5 storage payload: malformed JSON under key "${STORAGE_KEY_V5}": ${err.message}`
     );
   }
 
-  // Validate root collection arrays
-  assertArray(state, 'profiles', 'data');
-  assertArray(state, 'schools', 'data');
-  assertArray(state, 'principalHistories', 'data');
-  assertArray(state, 'workspaces', 'data');
-  assertArray(state, 'yearPlans', 'data');
-  assertArray(state, 'semesterPlans', 'data');
-  assertArray(state, 'annualJPReferences', 'data');
-  assertArray(state, 'semesterJPSettings', 'data');
-  assertArray(state, 'documents', 'data');
+  return validateStorageStateV5(parsed);
+}
 
-  // Validate annualData structure & collections
-  const annualData = assertObject(state, 'annualData', 'data');
-  assertArray(annualData, 'cp', 'data.annualData');
-  assertArray(annualData, 'cpAnalysis', 'data.annualData');
-  assertArray(annualData, 'tp', 'data.annualData');
-  assertArray(annualData, 'atp', 'data.annualData');
-  assertArray(annualData, 'curriculumContext', 'data.annualData');
-
-  // Validate semesterData structure & collections
-  const semesterData = assertObject(state, 'semesterData', 'data');
-  assertArray(semesterData, 'academicCalendar', 'data.semesterData');
-  assertArray(semesterData, 'timeAllocation', 'data.semesterData');
-  assertArray(semesterData, 'learningPlan', 'data.semesterData');
-  assertArray(semesterData, 'assessmentCriteria', 'data.semesterData');
-  assertArray(semesterData, 'assessmentPlan', 'data.semesterData');
-  assertArray(semesterData, 'assessmentPackage', 'data.semesterData');
-  assertArray(semesterData, 'roster', 'data.semesterData');
-  assertArray(semesterData, 'attendance', 'data.semesterData');
-  assertArray(semesterData, 'grade', 'data.semesterData');
-  assertArray(semesterData, 'remedial', 'data.semesterData');
-  assertArray(semesterData, 'enrichment', 'data.semesterData');
-
-  return state as unknown as AppStorageStateV5;
+/**
+ * Resets the V5 storage state to canonical empty initial state.
+ * Only touches STORAGE_KEY_V5 without modifying legacy storage keys.
+ */
+export function resetStorageV5(): AppStorageStateV5 {
+  const initial = createInitialStorageV5();
+  saveStorageV5(initial);
+  return initial;
 }
