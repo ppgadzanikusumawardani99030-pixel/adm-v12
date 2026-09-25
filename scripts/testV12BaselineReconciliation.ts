@@ -186,6 +186,77 @@ runTest('F. Protected Subsystem: Assessment core exports remain intact and funct
   assert.strictEqual(fs.existsSync(assessmentExportServicePath), true);
 });
 
+// =========================================================================
+// SECTION G: Micro-Fix Anti-Synthetic & Unverified Calendar Regression Lock
+// =========================================================================
+runTest('G. Micro-Fix Regression Lock: Unverified calendars removed, no synthetic scheduling, ATP partial guard', () => {
+  // ASSERT A: Unverified calendar seeds removed
+  const regionalCalendarsPath = path.resolve(process.cwd(), 'src/data/calendar/regionalCalendars.ts');
+  const regionalCalendarsContent = fs.readFileSync(regionalCalendarsPath, 'utf-8');
+  assert.strictEqual(
+    regionalCalendarsContent.includes('kaldik-kab-bandung-2026-2027'),
+    false,
+    'regionalCalendars.ts must not contain unverified kaldik-kab-bandung-2026-2027'
+  );
+  assert.strictEqual(
+    regionalCalendarsContent.includes('kaldik-nasional-2024-2025'),
+    false,
+    'regionalCalendars.ts must not contain unverified kaldik-nasional-2024-2025'
+  );
+  assert.strictEqual(
+    regionalCalendarsContent.includes('kaldik-nasional-2025-2026'),
+    false,
+    'regionalCalendars.ts must not contain unverified kaldik-nasional-2025-2026'
+  );
+  assert.strictEqual(
+    regionalCalendarsContent.includes('kaldik-nasional-2026-2027'),
+    false,
+    'regionalCalendars.ts must not contain unverified kaldik-nasional-2026-2027'
+  );
+
+  // ASSERT B: pdfDocGenerators.ts does not contain synthetic PROMES sequence
+  const pdfGenPath = path.resolve(process.cwd(), 'src/services/documentEngine/renderers/pdf/pdfDocGenerators.ts');
+  const pdfGenContent = fs.readFileSync(pdfGenPath, 'utf-8');
+  assert.strictEqual(
+    pdfGenContent.includes("'v', '', '', '', 'v'"),
+    false,
+    'pdfDocGenerators.ts must not contain synthetic PROMES week sequence'
+  );
+
+  // ASSERT C: Does not contain synthetic week range
+  assert.strictEqual(
+    pdfGenContent.includes('Minggu ke-${idx * 2 + 1}'),
+    false,
+    'pdfDocGenerators.ts must not fabricate week range "Minggu ke-${idx * 2 + 1}"'
+  );
+
+  // ASSERT D: Does not use fallback "1 Pekan Efektif" or "Bulan Berjalan"
+  assert.strictEqual(
+    pdfGenContent.includes('1 Pekan Efektif'),
+    false,
+    'pdfDocGenerators.ts must not contain fallback "1 Pekan Efektif"'
+  );
+  assert.strictEqual(
+    pdfGenContent.includes('Bulan Berjalan'),
+    false,
+    'pdfDocGenerators.ts must not contain fallback "Bulan Berjalan"'
+  );
+
+  // ASSERT E: ATP generators have partial allocation status distinction
+  const atpGenPath = path.resolve(process.cwd(), 'src/services/documentEngine/generators/atpGenerator.ts');
+  const atpGenContent = fs.readFileSync(atpGenPath, 'utf-8');
+  assert.strictEqual(
+    atpGenContent.includes('Alokasi belum lengkap'),
+    true,
+    'atpGenerator.ts must contain partial allocation distinction "Alokasi belum lengkap"'
+  );
+  assert.strictEqual(
+    pdfGenContent.includes('Alokasi belum lengkap'),
+    true,
+    'pdfDocGenerators.ts must contain partial allocation distinction "Alokasi belum lengkap"'
+  );
+});
+
 console.log(`\n========================================`);
 console.log(`ALL V12 BASELINE RECONCILIATION TESTS PASSED (${passedTests}/${totalTests})`);
 console.log(`========================================\n`);

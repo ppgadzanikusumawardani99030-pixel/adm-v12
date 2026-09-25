@@ -108,7 +108,35 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
   });
 
   // Total JP Row
-  const totalJP = (atp?.items || []).reduce((acc, curr) => acc + (Number(curr.allocatedJP ?? curr.jp) || 0), 0);
+  const items = atp?.items || [];
+  const knownJPItems = items.filter(
+    (item) => (item.allocatedJP ?? item.jp) != null
+  );
+  const unknownJPCount = items.length - knownJPItems.length;
+  const knownTotalJP = knownJPItems.reduce(
+    (sum, item) => sum + Number(item.allocatedJP ?? item.jp ?? 0),
+    0
+  );
+
+  let totalLabel = 'TOTAL ALOKASI WAKTU: ';
+  let totalValue = '—';
+  let totalStatusNote = '';
+
+  if (items.length === 0) {
+    totalLabel = 'TOTAL ALOKASI WAKTU: ';
+    totalValue = '—';
+  } else if (unknownJPCount === 0) {
+    totalLabel = 'TOTAL ALOKASI WAKTU: ';
+    totalValue = `${knownTotalJP} JP`;
+  } else if (unknownJPCount > 0 && knownTotalJP > 0) {
+    totalLabel = 'JP TERALOKASI SEMENTARA: ';
+    totalValue = `${knownTotalJP} JP`;
+    totalStatusNote = 'Alokasi belum lengkap';
+  } else {
+    totalLabel = 'TOTAL ALOKASI WAKTU: ';
+    totalValue = 'Belum ditetapkan';
+  }
+
   const totalRow = new TableRow({
     children: [
       new TableCell({
@@ -121,7 +149,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
             spacing: { line: 240, after: 0 },
             children: [
               new TextRun({
-                text: 'TOTAL ALOKASI WAKTU: ',
+                text: totalLabel,
                 bold: true,
                 size: 20,
                 font: DOCX_FONT,
@@ -131,11 +159,27 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
           }),
         ],
       }),
-      createTableDataCell(totalJP > 0 ? `${totalJP} JP` : '—', 10, AlignmentType.CENTER, true),
+      createTableDataCell(totalValue, 10, AlignmentType.CENTER, true),
       new TableCell({
         width: { size: 36, type: WidthType.PERCENTAGE },
         columnSpan: 2,
-        children: [new Paragraph({})],
+        margins: { top: 100, bottom: 100, left: 120, right: 120 },
+        children: [
+          new Paragraph({
+            spacing: { line: 240, after: 0 },
+            children: totalStatusNote
+              ? [
+                  new TextRun({
+                    text: totalStatusNote,
+                    italics: true,
+                    size: 18,
+                    font: DOCX_FONT,
+                    color: '718096',
+                  }),
+                ]
+              : [],
+          }),
+        ],
       }),
     ],
   });

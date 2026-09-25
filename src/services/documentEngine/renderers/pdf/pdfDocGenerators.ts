@@ -211,13 +211,27 @@ export async function generatePdfDocument(
     case 'ATP': {
       title = 'Alur Tujuan Pembelajaran (ATP)';
       const atpItemsList = atp?.items || [];
-      const calculatedTotalJP = atpItemsList.reduce((acc, curr) => acc + (Number(curr.allocatedJP ?? curr.jp) || 0), 0);
-      const totalJPText = atp?.totalJP != null
-        ? `${atp.totalJP} JP`
-        : calculatedTotalJP > 0
-        ? `${calculatedTotalJP} JP`
-        : 'Belum ditetapkan';
-      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — Total Alokasi: ${totalJPText}`;
+      const knownJPItems = atpItemsList.filter(
+        (item) => (item.allocatedJP ?? item.jp) != null
+      );
+      const unknownJPCount = atpItemsList.length - knownJPItems.length;
+      const knownTotalJP = knownJPItems.reduce(
+        (sum, item) => sum + Number(item.allocatedJP ?? item.jp ?? 0),
+        0
+      );
+
+      let totalAllocationStatus = 'Total Alokasi: Belum ditetapkan';
+      if (atpItemsList.length === 0) {
+        totalAllocationStatus = 'Total Alokasi: —';
+      } else if (unknownJPCount === 0) {
+        totalAllocationStatus = `Total Alokasi: ${knownTotalJP} JP`;
+      } else if (unknownJPCount > 0 && knownTotalJP > 0) {
+        totalAllocationStatus = `JP Teralokasi Sementara: ${knownTotalJP} JP — Alokasi belum lengkap`;
+      } else {
+        totalAllocationStatus = 'Total Alokasi: Belum ditetapkan';
+      }
+
+      subTitle = `${subject} — ${grade} (${academicSetting?.phase || 'Fase A'}) — ${totalAllocationStatus}`;
       fileName = `ATP_${cleanSubject}_${cleanGrade}.pdf`;
       orientation = 'landscape';
 
@@ -351,7 +365,7 @@ export async function generatePdfDocument(
               it.tpStatement || '-',
               it.materialScope || '-',
               itJpDisplay,
-              'v', '', '', '', 'v', '', '', '', 'v', '', '', '', 'v', '', '', '',
+              '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
             ];
           });
 
@@ -764,10 +778,10 @@ export async function generatePdfDocument(
             return [
               idx + 1,
               matchingTp?.code || `TP ${idx + 1}`,
-              matchingTp?.contentScope || matchingTp?.statement || a.notes || 'Materi Pokok',
-              a.weekNumber ? `Pekan ke-${a.weekNumber}` : '1 Pekan Efektif',
+              matchingTp?.contentScope || matchingTp?.statement || a.notes || '—',
+              a.weekNumber ? `Pekan ke-${a.weekNumber}` : '—',
               a.jp != null ? `${a.jp} JP` : '—',
-              a.notes || `${a.monthName || 'Bulan Berjalan'} - Tatap Muka`,
+              a.notes || a.monthName || '—',
             ];
           })
         : (atp?.items || []).map((it, idx) => {
@@ -776,10 +790,10 @@ export async function generatePdfDocument(
             return [
               idx + 1,
               it.tpCode || `TP ${idx + 1}`,
-              it.materialScope || it.tpStatement || '-',
-              'Pekan Efektif',
+              it.materialScope || it.tpStatement || '—',
+              '—',
               itJpDisplay,
-              `Minggu ke-${idx * 2 + 1} s.d ${idx * 2 + 2}`,
+              'Belum dialokasikan',
             ];
           });
 
