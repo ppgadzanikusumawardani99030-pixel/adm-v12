@@ -2,9 +2,36 @@ import {
   AppStorageStateV5,
   StorageBackupV5,
   STORAGE_KEY_V5,
+  AdministrationWorkspaceV5,
 } from '../types/storageV5';
+import {
+  YearPlan,
+  SemesterPlan,
+  CurriculumType,
+} from '../types';
 
 export { STORAGE_KEY_V5 };
+
+export interface CreateYearHierarchyV5Params {
+  profileId: string;
+  schoolId: string;
+  academicYear: string;
+  curriculumType: CurriculumType;
+  level: 'SD' | 'SMP' | 'SMA' | 'SMK';
+  grade: string;
+  classSection?: string;
+  subject: string;
+  subjectCode?: string;
+  phase?: string;
+  workspaceName?: string;
+  documentDate?: string;
+}
+
+export interface CreateYearHierarchyV5Result {
+  yearPlan: YearPlan;
+  workspace: AdministrationWorkspaceV5;
+  semesterPlans: [SemesterPlan, SemesterPlan];
+}
 
 /**
  * Creates an empty, canonical initial state for Storage V5.
@@ -259,4 +286,230 @@ export function resetStorageV5(): AppStorageStateV5 {
   const initial = createInitialStorageV5();
   saveStorageV5(initial);
   return initial;
+}
+
+/**
+ * Atomically creates a complete canonical YearPlan hierarchy:
+ * 1 YearPlan
+ * 1 AdministrationWorkspaceV5
+ * 2 SemesterPlans (Semester 1 & 2)
+ *
+ * Rules:
+ * - Profile and School must exist and be validly associated (profile.schoolId === schoolId)
+ * - Rejects duplicate YearPlan identity tuple without silently reusing
+ * - Sets activeProfileId, activeYearPlanId, activeWorkspaceId
+ * - Leaves activeSemesterPlanId = undefined (never auto-selects Semester 1)
+ */
+export function createYearHierarchyV5(
+  params: CreateYearHierarchyV5Params
+): CreateYearHierarchyV5Result {
+  const state = loadStorageV5();
+
+  const profile = state.profiles.find((p) => p.id === params.profileId);
+  if (!profile) {
+    throw new Error(`Profile with ID "${params.profileId}" not found`);
+  }
+
+  const school = state.schools.find((s) => s.id === params.schoolId);
+  if (!school) {
+    throw new Error(`School with ID "${params.schoolId}" not found`);
+  }
+
+  if (profile.schoolId !== params.schoolId) {
+    throw new Error(
+      `Profile school mismatch: profile.schoolId "${profile.schoolId}" does not match requested schoolId "${params.schoolId}"`
+    );
+  }
+
+  // Check duplicate exact YearPlan identity: (profileId, schoolId, academicYear, grade, classSection, subject)
+  const isDuplicate = state.yearPlans.some(
+    (yp) =>
+      yp.profileId === params.profileId &&
+      yp.schoolId === params.schoolId &&
+      yp.academicYear === params.academicYear &&
+      yp.grade === params.grade &&
+      (yp.classSection || '') === (params.classSection || '') &&
+      yp.subject.trim().toLowerCase() === params.subject.trim().toLowerCase()
+  );
+
+  if (isDuplicate) {
+    throw new Error(
+      `Duplicate YearPlan: A YearPlan already exists for profileId "${params.profileId}", schoolId "${params.schoolId}", academicYear "${params.academicYear}", grade "${params.grade}", classSection "${params.classSection || ''}", and subject "${params.subject}".`
+    );
+  }
+
+  const now = new Date().toISOString();
+  const yearPlanId = `yp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const yearPlan: YearPlan = {
+    id: yearPlanId,
+    profileId: params.profileId,
+    schoolId: params.schoolId,
+    academicYear: params.academicYear,
+    curriculumType: params.curriculumType,
+    level: params.level,
+    grade: params.grade,
+    ...(params.classSection !== undefined ? { classSection: params.classSection } : {}),
+    subject: params.subject,
+    ...(params.subjectCode !== undefined ? { subjectCode: params.subjectCode } : {}),
+    ...(params.phase !== undefined ? { phase: params.phase } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const workspaceId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const workspaceName =
+    params.workspaceName?.trim() ||
+    `${params.subject} - ${params.grade} (${params.academicYear})`;
+
+  const workspace: AdministrationWorkspaceV5 = {
+    id: workspaceId,
+    profileId: params.profileId,
+    schoolId: params.schoolId,
+    yearPlanId: yearPlanId,
+    name: workspaceName,
+    ...(params.documentDate !== undefined ? { documentDate: params.documentDate } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const semesterPlan1: SemesterPlan = {
+    id: `sp-${Date.now()}-1-${Math.random().toString(36).slice(2, 9)}`,
+    yearPlanId: yearPlanId,
+    semester: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const semesterPlan2: SemesterPlan = {
+    id: `sp-${Date.now()}-2-${Math.random().toString(36).slice(2, 9)}`,
+    yearPlanId: yearPlanId,
+    semester: 2,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  state.yearPlans.push(yearPlan);
+  state.workspaces.push(workspace);
+  state.semesterPlans.push(semesterPlan1, semesterPlan2);
+
+  state.activeProfileId = params.profileId;
+  state.activeYearPlanId = yearPlanId;
+  state.activeWorkspaceId = workspaceId;
+  state.activeSemesterPlanId = undefined; // Strictly undefined on creation
+
+  saveStorageV5(state);
+
+  return {
+    yearPlan,
+    workspace,
+    semesterPlans: [semesterPlan1, semesterPlan2],
+  };
+}
+
+/**
+ * Retrieves a YearPlan by its ID.
+ */
+export function getYearPlanV5(yearPlanId: string): YearPlan | undefined {
+  const state = loadStorageV5();
+  return state.yearPlans.find((yp) => yp.id === yearPlanId);
+}
+
+/**
+ * Retrieves all SemesterPlans belonging to a YearPlan.
+ */
+export function getSemesterPlansForYearV5(yearPlanId: string): SemesterPlan[] {
+  const state = loadStorageV5();
+  return state.semesterPlans.filter((sp) => sp.yearPlanId === yearPlanId);
+}
+
+/**
+ * Sets the active YearPlan.
+ *
+ * Rules:
+ * - Validates that YearPlan exists
+ * - Updates activeYearPlanId, activeProfileId, and activeWorkspaceId
+ * - If activeSemesterPlanId is not a child of this YearPlan, it is cleared (undefined)
+ * - Never defaults or auto-selects Semester 1
+ */
+export function setActiveYearPlanV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  const yearPlan = state.yearPlans.find((yp) => yp.id === yearPlanId);
+  if (!yearPlan) {
+    throw new Error(`YearPlan with ID "${yearPlanId}" not found`);
+  }
+
+  state.activeYearPlanId = yearPlan.id;
+  state.activeProfileId = yearPlan.profileId;
+
+  const workspace = state.workspaces.find((w) => w.yearPlanId === yearPlan.id);
+  state.activeWorkspaceId = workspace ? workspace.id : undefined;
+
+  if (state.activeSemesterPlanId) {
+    const currentSp = state.semesterPlans.find((sp) => sp.id === state.activeSemesterPlanId);
+    if (!currentSp || currentSp.yearPlanId !== yearPlan.id) {
+      state.activeSemesterPlanId = undefined;
+    }
+  }
+
+  saveStorageV5(state);
+}
+
+/**
+ * Sets the active SemesterPlan.
+ *
+ * Rules:
+ * - Validates that SemesterPlan exists
+ * - Sets activeSemesterPlanId
+ * - Synchronizes activeYearPlanId to parent YearPlan
+ * - Synchronizes activeProfileId to parent YearPlan's profileId
+ * - Synchronizes activeWorkspaceId to parent YearPlan's workspace
+ */
+export function setActiveSemesterPlanV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  const semesterPlan = state.semesterPlans.find((sp) => sp.id === semesterPlanId);
+  if (!semesterPlan) {
+    throw new Error(`SemesterPlan with ID "${semesterPlanId}" not found`);
+  }
+
+  const parentYearPlan = state.yearPlans.find((yp) => yp.id === semesterPlan.yearPlanId);
+  if (!parentYearPlan) {
+    throw new Error(
+      `Parent YearPlan "${semesterPlan.yearPlanId}" not found for SemesterPlan "${semesterPlanId}"`
+    );
+  }
+
+  const workspace = state.workspaces.find((w) => w.yearPlanId === parentYearPlan.id);
+
+  state.activeSemesterPlanId = semesterPlan.id;
+  state.activeYearPlanId = parentYearPlan.id;
+  state.activeProfileId = parentYearPlan.profileId;
+  state.activeWorkspaceId = workspace ? workspace.id : undefined;
+
+  saveStorageV5(state);
+}
+
+/**
+ * Renames an existing AdministrationWorkspaceV5.
+ *
+ * Rules:
+ * - Rejects if workspace is not found
+ * - Only modifies `name` and `updatedAt`
+ */
+export function renameWorkspaceV5(workspaceId: string, name: string): void {
+  const trimmed = name?.trim();
+  if (!trimmed) {
+    throw new Error('Workspace name cannot be empty');
+  }
+
+  const state = loadStorageV5();
+  const workspace = state.workspaces.find((w) => w.id === workspaceId);
+  if (!workspace) {
+    throw new Error(`Workspace with ID "${workspaceId}" not found`);
+  }
+
+  workspace.name = trimmed;
+  workspace.updatedAt = new Date().toISOString();
+
+  saveStorageV5(state);
 }
