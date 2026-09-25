@@ -1,6 +1,77 @@
 export type CurriculumType = 'KURIKULUM_MERDEKA' | 'K13';
 export type DocumentMode = 'data' | 'blank';
 
+export type SemesterNumber = 1 | 2;
+export type AcademicScopeType = 'YEAR' | 'SEMESTER';
+
+/**
+ * Lightweight contract for locking curriculum context at YearPlan level.
+ */
+export interface CurriculumContextLock {
+  curriculumType: CurriculumType;
+  academicYear: string;
+  regulationIds?: string[];
+  structureRuleId?: string;
+  cpVersion?: string;
+  lockedAt?: string;
+}
+
+/**
+ * Canonical YearPlan represents the administrative identity of 1 full academic year.
+ * Must NOT contain semester authority or activeSemester fields.
+ */
+export interface YearPlan {
+  id: string;
+  profileId: string;
+  schoolId: string;
+  academicYear: string;
+  curriculumType: CurriculumType;
+  level: 'SD' | 'SMP' | 'SMA' | 'SMK';
+  grade: string;
+  classSection?: string;
+  subject: string;
+  subjectCode?: string;
+  phase?: string;
+  curriculumLock?: CurriculumContextLock;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Canonical SemesterPlan represents a semester under a parent YearPlan.
+ * Derives profileId, schoolId, academicYear, grade, subject, curriculumType from parent YearPlan.
+ */
+export interface SemesterPlan {
+  id: string;
+  yearPlanId: string;
+  semester: SemesterNumber;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Annual official JP reference.
+ * Note: referenceWeeklyEquivalentJP != actualScheduledWeeklyJP.
+ */
+export interface AnnualJPReference {
+  officialAnnualJP: number | null;
+  referenceWeeklyEquivalentJP?: number | null;
+  regulationReference?: string;
+}
+
+/**
+ * Semester scheduled JP setting.
+ * Note: actualScheduledWeeklyJP is the real school schedule, distinct from reference weekly equivalent.
+ */
+export interface SemesterJPSetting {
+  semesterPlanId: string;
+  actualScheduledWeeklyJP: number | null;
+  source:
+    | 'SCHOOL_SCHEDULE'
+    | 'TEACHER_CONFIRMED'
+    | 'UNRESOLVED';
+}
+
 export type { AssessmentPackageValidationContext } from '../services/assessmentPackageService';
 
 export * from './jpEngine';
@@ -96,6 +167,9 @@ export interface PrincipalHistory {
   createdAt: string;
 }
 
+/**
+ * @deprecated legacy runtime contract — migration target YearPlan/SemesterPlan
+ */
 export interface AdministrationWorkspace {
   id: string;
   profileId: string;
@@ -112,6 +186,9 @@ export interface AdministrationWorkspace {
   updatedAt: string;
 }
 
+/**
+ * @deprecated legacy runtime contract — migration target YearPlan/SemesterPlan
+ */
 export interface AcademicSetting {
   id: string;
   profileId: string;
@@ -135,6 +212,7 @@ export interface AcademicSetting {
 /**
  * Single source of truth for the active working context
  * used across all downstream steps (CP, TP, ATP, AdminDocs, AI prompts).
+ * @deprecated legacy runtime contract — migration target YearPlan/SemesterPlan
  */
 export interface ActiveContext {
   profileId: string;
@@ -312,6 +390,11 @@ export interface ATPItem {
   materialScope?: string; // Resolved display material scope
   allocatedJP?: number | null; // Alokasi Jam Pelajaran (explicitly nullable! Unknown = null)
   jp?: number | null; // Compatibility field
+  /**
+   * @deprecated BUKAN canonical authority penempatan semester ke depan.
+   * Canonical semester placement nantinya berasal dari: TimeAllocation → SemesterPlan.
+   * Dipertahankan untuk backward compatibility legacy runtime.
+   */
   semester?: 1 | 2 | null;
   /**
    * @deprecated Legacy compatibility.
