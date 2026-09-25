@@ -1593,3 +1593,4 @@ export * from './assessmentGeneration';
 export * from './assessmentValidation';
 export * from './assessmentRegeneration';
 export * from './assessmentExport';
+export * from './storageV5';
