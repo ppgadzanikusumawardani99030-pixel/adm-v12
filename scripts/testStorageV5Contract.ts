@@ -11,6 +11,7 @@ import {
   SemesterScopedEntry,
   YearPlan,
   SemesterPlan,
+  AdministrationWorkspaceV5,
   AssessmentPackage,
   CPData,
   TPData,
@@ -49,7 +50,7 @@ runTest('1. Storage Key and Schema Version: Exact key and schemaVersion: 5', () 
 // =========================================================================
 // TEST 2: Initial State Structure and Collections
 // =========================================================================
-runTest('2. Initial State Structure: Contains all required annual, semester, and root collections', () => {
+runTest('2. Initial State Structure: Contains all required annual, semester, and root collections without dual JP SSOT', () => {
   const state = createInitialStorageV5();
 
   // Root collections
@@ -69,7 +70,13 @@ runTest('2. Initial State Structure: Contains all required annual, semester, and
   assert(Array.isArray(state.annualData.tp), 'annualData.tp must be an array');
   assert(Array.isArray(state.annualData.atp), 'annualData.atp must be an array');
   assert(Array.isArray(state.annualData.curriculumContext), 'annualData.curriculumContext must be an array');
-  assert(Array.isArray(state.annualData.annualJPReference), 'annualData.annualJPReference must be an array');
+
+  // Strict: No dual Annual JP SSOT in annualData
+  assert.strictEqual(
+    'annualJPReference' in state.annualData,
+    false,
+    'annualData.annualJPReference must be removed to avoid dual SSOT'
+  );
 
   // Semester data store
   assert(Array.isArray(state.semesterData.academicCalendar), 'semesterData.academicCalendar must be an array');
@@ -86,9 +93,9 @@ runTest('2. Initial State Structure: Contains all required annual, semester, and
 });
 
 // =========================================================================
-// TEST 3: YearPlan & SemesterPlan Hierarchy (No AcademicSetting SSOT in V5)
+// TEST 3: YearPlan, SemesterPlan, & AdministrationWorkspaceV5 Hierarchy
 // =========================================================================
-runTest('3. YearPlan & SemesterPlan Hierarchy: YearPlan has no semester authority, SemesterPlan references yearPlanId', () => {
+runTest('3. YearPlan & Workspace Hierarchy: AdministrationWorkspaceV5 references yearPlanId without academicSettingId or semester', () => {
   const sampleYearPlan: YearPlan = {
     id: 'yp-2026-pjok-7',
     profileId: 'prof-1',
@@ -118,6 +125,23 @@ runTest('3. YearPlan & SemesterPlan Hierarchy: YearPlan has no semester authorit
   assert.strictEqual('academicYear' in sampleSemesterPlan, false, 'SemesterPlan must NOT duplicate academicYear');
   assert.strictEqual('subject' in sampleSemesterPlan, false, 'SemesterPlan must NOT duplicate subject');
   assert.strictEqual('grade' in sampleSemesterPlan, false, 'SemesterPlan must NOT duplicate grade');
+
+  // AdministrationWorkspaceV5 check
+  const sampleWorkspaceV5: AdministrationWorkspaceV5 = {
+    id: 'ws-100',
+    profileId: 'prof-1',
+    schoolId: 'sch-1',
+    yearPlanId: 'yp-2026-pjok-7',
+    name: 'PJOK Kelas 7 — 2026/2027',
+    documentDate: '2026-07-15',
+    createdAt: '2026-07-15T08:00:00.000Z',
+    updatedAt: '2026-07-15T08:00:00.000Z',
+  };
+
+  assert.strictEqual(sampleWorkspaceV5.yearPlanId, 'yp-2026-pjok-7');
+  assert.strictEqual('academicSettingId' in sampleWorkspaceV5, false, 'Workspace V5 must NOT have academicSettingId');
+  assert.strictEqual('semester' in sampleWorkspaceV5, false, 'Workspace V5 must NOT have semester');
+  assert.strictEqual('activeSemester' in sampleWorkspaceV5, false, 'Workspace V5 must NOT have activeSemester');
 });
 
 // =========================================================================
@@ -167,13 +191,14 @@ runTest('5. Serialization: Wraps state into canonical V5 envelope', () => {
 });
 
 // =========================================================================
-// TEST 6: Strict Rejection of Legacy Versions & Malformed Payloads
+// TEST 6: Strict Rejection of Incomplete Payloads, Legacy Versions & Malformed Envelopes
 // =========================================================================
-runTest('6. Validation & Rejection: Rejects legacy versions and malformed envelopes without migration', () => {
+runTest('6. Validation & Rejection: Rejects incomplete V5 payloads, legacy versions, and malformed envelopes', () => {
   // Wrong schemaVersion (e.g. 4 or 3)
   const legacyV4 = JSON.stringify({
     app: 'Administrasi Guru AI',
     schemaVersion: 4,
+    exportedAt: '2026-09-25T10:00:00Z',
     data: { schemaVersion: 4 },
   });
   assert.throws(
@@ -182,23 +207,149 @@ runTest('6. Validation & Rejection: Rejects legacy versions and malformed envelo
     'Must throw on non-5 schemaVersion'
   );
 
-  // Legacy V3 format with "version: 3"
-  const legacyV3 = JSON.stringify({
-    version: 3,
-    activeProfileId: 'prof-1',
-    profiles: [],
+  // Incomplete data: only { schemaVersion: 5 }
+  const incompleteData = JSON.stringify({
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '2026-09-25T10:00:00Z',
+    data: { schemaVersion: 5 },
   });
   assert.throws(
-    () => parseBackupV5(legacyV3),
-    /Invalid backup/i,
-    'Must throw on legacy V3 without V5 envelope'
+    () => parseBackupV5(incompleteData),
+    /must be an array/i,
+    'Must throw when root collections are missing'
+  );
+
+  // Missing profiles
+  const missingProfiles = JSON.stringify({
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '2026-09-25T10:00:00Z',
+    data: {
+      schemaVersion: 5,
+      schools: [],
+      principalHistories: [],
+      workspaces: [],
+      yearPlans: [],
+      semesterPlans: [],
+      annualJPReferences: [],
+      semesterJPSettings: [],
+      documents: [],
+      annualData: { cp: [], cpAnalysis: [], tp: [], atp: [], curriculumContext: [] },
+      semesterData: {
+        academicCalendar: [],
+        timeAllocation: [],
+        learningPlan: [],
+        assessmentCriteria: [],
+        assessmentPlan: [],
+        assessmentPackage: [],
+        roster: [],
+        attendance: [],
+        grade: [],
+        remedial: [],
+        enrichment: [],
+      },
+    },
+  });
+  assert.throws(
+    () => parseBackupV5(missingProfiles),
+    /data\.profiles.*must be an array/i,
+    'Must throw when profiles is missing'
+  );
+
+  // Missing annualData
+  const missingAnnualData = JSON.stringify({
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '2026-09-25T10:00:00Z',
+    data: {
+      schemaVersion: 5,
+      profiles: [],
+      schools: [],
+      principalHistories: [],
+      workspaces: [],
+      yearPlans: [],
+      semesterPlans: [],
+      annualJPReferences: [],
+      semesterJPSettings: [],
+      documents: [],
+      semesterData: {
+        academicCalendar: [],
+        timeAllocation: [],
+        learningPlan: [],
+        assessmentCriteria: [],
+        assessmentPlan: [],
+        assessmentPackage: [],
+        roster: [],
+        attendance: [],
+        grade: [],
+        remedial: [],
+        enrichment: [],
+      },
+    },
+  });
+  assert.throws(
+    () => parseBackupV5(missingAnnualData),
+    /data\.annualData.*must be an object/i,
+    'Must throw when annualData is missing'
+  );
+
+  // Missing semesterData.assessmentPackage
+  const missingAssessmentPkg = JSON.stringify({
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '2026-09-25T10:00:00Z',
+    data: {
+      schemaVersion: 5,
+      profiles: [],
+      schools: [],
+      principalHistories: [],
+      workspaces: [],
+      yearPlans: [],
+      semesterPlans: [],
+      annualJPReferences: [],
+      semesterJPSettings: [],
+      documents: [],
+      annualData: { cp: [], cpAnalysis: [], tp: [], atp: [], curriculumContext: [] },
+      semesterData: {
+        academicCalendar: [],
+        timeAllocation: [],
+        learningPlan: [],
+        assessmentCriteria: [],
+        assessmentPlan: [],
+        roster: [],
+        attendance: [],
+        grade: [],
+        remedial: [],
+        enrichment: [],
+      },
+    },
+  });
+  assert.throws(
+    () => parseBackupV5(missingAssessmentPkg),
+    /data\.semesterData\.assessmentPackage.*must be an array/i,
+    'Must throw when assessmentPackage collection is missing'
+  );
+
+  // Invalid exportedAt (empty string)
+  const invalidExportedAt = JSON.stringify({
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '',
+    data: createInitialStorageV5(),
+  });
+  assert.throws(
+    () => parseBackupV5(invalidExportedAt),
+    /exportedAt.*must be a valid non-empty/i,
+    'Must throw on empty exportedAt'
   );
 
   // Wrong app identifier
   const wrongApp = JSON.stringify({
     app: 'Other App',
     schemaVersion: 5,
-    data: { schemaVersion: 5 },
+    exportedAt: '2026-09-25T10:00:00Z',
+    data: createInitialStorageV5(),
   });
   assert.throws(
     () => parseBackupV5(wrongApp),
@@ -208,19 +359,12 @@ runTest('6. Validation & Rejection: Rejects legacy versions and malformed envelo
 
   // Malformed JSON
   assert.throws(() => parseBackupV5('{ not valid json'), /Malformed JSON/i);
-
-  // Missing data payload
-  const missingData = JSON.stringify({
-    app: 'Administrasi Guru AI',
-    schemaVersion: 5,
-  });
-  assert.throws(() => parseBackupV5(missingData), /data payload is missing/i);
 });
 
 // =========================================================================
 // TEST 7: Lossless Round-Trip across all collections
 // =========================================================================
-runTest('7. Lossless Round-Trip: Complete state survives serialize -> parse with deep equality', () => {
+runTest('7. Lossless Round-Trip: Complete canonical state survives serialize -> parse with exact deep equality', () => {
   const fullState: AppStorageStateV5 = {
     schemaVersion: 5,
     activeProfileId: 'prof-100',
@@ -272,7 +416,7 @@ runTest('7. Lossless Round-Trip: Complete state survives serialize -> parse with
         id: 'ws-100',
         profileId: 'prof-100',
         schoolId: 'sch-100',
-        academicSettingId: 'as-deprecated',
+        yearPlanId: 'yp-100',
         name: 'Informatika Kelas 10 — 2026/2027',
         documentDate: '2026-07-15',
         createdAt: '2026-07-10T08:00:00Z',
@@ -392,14 +536,6 @@ runTest('7. Lossless Round-Trip: Complete state survives serialize -> parse with
           },
         },
       ],
-      annualJPReference: [
-        {
-          yearPlanId: 'yp-100',
-          value: {
-            officialAnnualJP: 108,
-          },
-        },
-      ],
     },
     semesterData: {
       academicCalendar: [
@@ -511,7 +647,7 @@ runTest('7. Lossless Round-Trip: Complete state survives serialize -> parse with
 // =========================================================================
 // TEST 8: AssessmentPackage Sentinel Invariant (Internal structure is untouched)
 // =========================================================================
-runTest('8. AssessmentPackage Invariant: Complex AssessmentPackage survives intact inside SemesterScopedEntry', () => {
+runTest('8. AssessmentPackage Invariant: Complex AssessmentPackage survives intact inside SemesterScopedEntry<AssessmentPackage[]>', () => {
   const sampleAssessmentPackage: AssessmentPackage = {
     id: 'pkg-inf-01',
     assessmentPlanId: 'plan-inf-01',
@@ -576,13 +712,13 @@ runTest('8. AssessmentPackage Invariant: Complex AssessmentPackage survives inta
   const state = createInitialStorageV5();
   state.semesterData.assessmentPackage.push({
     semesterPlanId: 'sp-100',
-    value: sampleAssessmentPackage,
+    value: [sampleAssessmentPackage],
   });
 
   const serialized = serializeBackupV5(state);
   const parsed = parseBackupV5(serialized);
 
-  const restoredPackage = parsed.semesterData.assessmentPackage[0].value as AssessmentPackage;
+  const restoredPackage = parsed.semesterData.assessmentPackage[0].value[0] as AssessmentPackage;
   assert.deepStrictEqual(
     restoredPackage,
     sampleAssessmentPackage,

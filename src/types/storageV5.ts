@@ -2,7 +2,6 @@ import {
   TeacherProfile,
   SchoolData,
   PrincipalHistory,
-  AdministrationWorkspace,
   YearPlan,
   SemesterPlan,
   AnnualJPReference,
@@ -35,6 +34,21 @@ import {
 export const STORAGE_KEY_V5 = 'administrasi_guru_ai_storage_v5';
 
 /**
+ * Workspace V5 representation bound strictly to YearPlan.
+ * Does not contain academicSettingId, semester, or activeSemester.
+ */
+export interface AdministrationWorkspaceV5 {
+  id: string;
+  profileId: string;
+  schoolId: string;
+  yearPlanId: string;
+  name: string;
+  documentDate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * Scoped container for entities belonging strictly to an annual (YearPlan) scope.
  */
 export interface YearScopedEntry<T> {
@@ -59,7 +73,6 @@ export interface AnnualDataStoreV5 {
   tp: YearScopedEntry<TPData>[];
   atp: YearScopedEntry<ATPData>[];
   curriculumContext: YearScopedEntry<CurriculumContextLock>[];
-  annualJPReference: YearScopedEntry<AnnualJPReference>[];
 }
 
 export interface SemesterCalendarEntry {
@@ -79,17 +92,18 @@ export interface SemesterGradeEntry {
 
 /**
  * Semester domain entity collections owned at the SemesterPlan level.
+ * Exact canonical shapes without union representations.
  */
 export interface SemesterDataStoreV5 {
-  academicCalendar: SemesterScopedEntry<SemesterCalendarEntry | AcademicCalendar>[];
+  academicCalendar: SemesterScopedEntry<SemesterCalendarEntry>[];
   timeAllocation: SemesterScopedEntry<TimeAllocation[]>[];
-  learningPlan: SemesterScopedEntry<LearningPlan[] | LearningPlan>[];
+  learningPlan: SemesterScopedEntry<LearningPlan[]>[];
   assessmentCriteria: SemesterScopedEntry<AssessmentCriterion[]>[];
-  assessmentPlan: SemesterScopedEntry<AssessmentPlan[] | AssessmentPlan>[];
-  assessmentPackage: SemesterScopedEntry<AssessmentPackage[] | AssessmentPackage>[];
+  assessmentPlan: SemesterScopedEntry<AssessmentPlan[]>[];
+  assessmentPackage: SemesterScopedEntry<AssessmentPackage[]>[];
   roster: SemesterScopedEntry<Student[]>[];
-  attendance: SemesterScopedEntry<SemesterAttendanceEntry | AttendanceRecord[]>[];
-  grade: SemesterScopedEntry<SemesterGradeEntry | AssessmentResult[]>[];
+  attendance: SemesterScopedEntry<SemesterAttendanceEntry>[];
+  grade: SemesterScopedEntry<SemesterGradeEntry>[];
   remedial: SemesterScopedEntry<RemedialRecord[]>[];
   enrichment: SemesterScopedEntry<EnrichmentRecord[]>[];
 }
@@ -109,7 +123,7 @@ export interface AppStorageStateV5 {
   schools: SchoolData[];
   principalHistories: PrincipalHistory[];
 
-  workspaces: AdministrationWorkspace[];
+  workspaces: AdministrationWorkspaceV5[];
   yearPlans: YearPlan[];
   semesterPlans: SemesterPlan[];
 
