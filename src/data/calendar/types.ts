@@ -51,6 +51,7 @@ export interface RegionalSemesterConfig {
 
 export interface RegionalEducationCalendar {
   id: string;
+  scope?: 'REGENCY' | 'PROVINCE' | 'NATIONAL';
   province: string;
   regency?: string; // Optional if specific to regency/city
   academicYear: string; // e.g. "2024/2025", "2025/2026", "2026/2027"

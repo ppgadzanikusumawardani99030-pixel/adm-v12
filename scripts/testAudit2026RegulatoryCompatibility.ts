@@ -61,6 +61,8 @@ const mockProfile: TeacherProfile = {
   updatedAt: new Date().toISOString(),
 };
 
+const fixedIsoDate = '2026-07-20T08:00:00.000Z';
+
 const mockSetting: AcademicSetting = {
   id: 'setting-2026',
   profileId: 'prof-1',
@@ -72,12 +74,14 @@ const mockSetting: AcademicSetting = {
   academicYear: '2025/2026',
   curriculum: 'Kurikulum Merdeka',
   curriculumType: 'KURIKULUM_MERDEKA',
-  updatedAt: new Date().toISOString(),
+  updatedAt: fixedIsoDate,
 };
 
 const mockTP: TPData = {
   id: 'tpdata-2026',
   academicSettingId: 'setting-2026',
+  workflowStatus: 'SIAP',
+  needsReview: false,
   items: [
     {
       id: 'tp-inf-01',
@@ -96,12 +100,16 @@ const mockTP: TPData = {
       order: 2,
     },
   ],
-  updatedAt: new Date().toISOString(),
+  updatedAt: fixedIsoDate,
 };
 
 const mockATP: ATPData = {
   id: 'atpdata-2026',
   academicSettingId: 'setting-2026',
+  tpId: 'tpdata-2026',
+  basedOnTpUpdatedAt: fixedIsoDate,
+  workflowStatus: 'SIAP',
+  needsReview: false,
   items: [
     {
       id: 'atp-inf-01',
@@ -110,8 +118,15 @@ const mockATP: ATPData = {
       materialScope: 'Algoritma dan Pemrograman',
       jp: 4,
     },
+    {
+      id: 'atp-inf-02',
+      tpId: 'tp-inf-02',
+      stepNumber: 2,
+      materialScope: 'Struktur Kontrol',
+      jp: 4,
+    },
   ],
-  updatedAt: new Date().toISOString(),
+  updatedAt: fixedIsoDate,
 };
 
 // ----------------------------------------------------
@@ -175,7 +190,7 @@ const planWithExperiences: LearningPlan = {
       },
     ],
   },
-  graduateProfileDimensions: ['Bernalar Kritis', 'Mandiri'],
+  graduateProfileDimensions: ['Penalaran Kritis', 'Kemandirian'],
   deepLearningContext: {
     principles: ['MINDFUL', 'MEANINGFUL', 'JOYFUL'],
   },
@@ -242,7 +257,7 @@ const invalidContextPlan: LearningPlan = {
   deepLearningContext: {
     principles: ['MINDFUL', 'MINDFUL', 'UNKNOWN_PRINCIPLE' as any],
   },
-  graduateProfileDimensions: ['Mandiri', 'Mandiri'],
+  graduateProfileDimensions: ['Kemandirian', 'Kemandirian'],
 };
 
 const res3 = validateLearningPlan(invalidContextPlan, {

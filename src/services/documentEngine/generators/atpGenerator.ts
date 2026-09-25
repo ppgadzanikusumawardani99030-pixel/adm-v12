@@ -33,7 +33,7 @@ export async function generateATP(context: DocumentGenerationContext): Promise<G
   docChildren.push(...createDocumentHeader('ALUR TUJUAN PEMBELAJARAN (ATP)', academicSetting.curriculum));
 
   // Metadata Table
-  docChildren.push(createIdentityMetadataTable(school, profile, academicSetting));
+  docChildren.push(createIdentityMetadataTable(school, profile, academicSetting, [], { scope: 'YEAR' }));
   docChildren.push(new Paragraph({ spacing: { after: 180 } }));
 
   // Rasionalisasi Alur Pembelajaran

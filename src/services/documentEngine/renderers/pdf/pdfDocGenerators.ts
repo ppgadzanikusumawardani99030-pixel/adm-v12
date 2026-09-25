@@ -11,6 +11,7 @@ import {
 import { formatOfficialDate, PdfStyleProfile } from './pdfTheme';
 import { resolveEffectiveContext, createDocumentSnapshot } from '../../snapshot';
 import { exportAssessmentPdf } from '../../assessmentExportService';
+import { normalizeSemester } from '../../../academicScope';
 
 export async function generatePdfDocument(
   type: DocumentType,
@@ -84,11 +85,13 @@ export async function generatePdfDocument(
 
       const rows = isBlankMode
         ? Array.from({ length: 12 }, (_, idx) => [idx + 1, '....................', '..........................................................................................'])
-        : (cp?.elements || []).map((elem, idx) => [
+        : (cp?.elements && cp.elements.length > 0)
+        ? cp.elements.map((elem, idx) => [
             idx + 1,
-            elem.name,
-            elem.content,
-          ]);
+            elem.name || '—',
+            elem.content || '—',
+          ])
+        : [[1, 'Semua Elemen', cp?.generalDescription || 'Capaian Pembelajaran belum diisi']];
 
       sections.push({
         type: 'table',
@@ -139,10 +142,10 @@ export async function generatePdfDocument(
         : (tp?.items || []).length > 0
         ? (tp?.items || []).map((it, idx) => [
             idx + 1,
-            it.elementName || 'Elemen Pembelajaran',
-            it.competence || 'Kompetensi',
-            it.contentScope || 'Lingkup Materi',
-            it.statement || 'Pernyataan TP',
+            it.elementName || '—',
+            it.competence || '—',
+            it.contentScope || '—',
+            it.statement || '—',
             (it.p3Dimensions || []).join(', ') || '-',
           ])
         : [[1, '—', '—', '—', 'Belum ada data analisis CP ke Tujuan Pembelajaran', '—']];
@@ -181,13 +184,15 @@ export async function generatePdfDocument(
             '....................',
             '....................',
           ])
-        : (tp?.items || []).map((it, idx) => [
+        : (tp?.items || []).length > 0
+        ? (tp?.items || []).map((it, idx) => [
             idx + 1,
             it.code || `TP ${idx + 1}`,
             it.statement || '-',
             it.contentScope || '-',
             (it.p3Dimensions || []).join(', ') || '-',
-          ]);
+          ])
+        : [[1, '—', 'Belum ada data Tujuan Pembelajaran', '—', '—']];
 
       sections.push({
         type: 'table',
@@ -295,9 +300,11 @@ export async function generatePdfDocument(
         : (atp?.items || []).map((it, idx) => {
             const itJp = it.allocatedJP ?? it.jp;
             const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
+            const itSem = normalizeSemester((it as any).semester);
+            const semDisplay = itSem === 1 ? 'Semester 1' : itSem === 2 ? 'Semester 2' : '—';
             return [
               idx + 1,
-              semester,
+              semDisplay,
               it.tpCode || `TP ${idx + 1}`,
               it.tpStatement || '-',
               it.materialScope || '-',
@@ -985,6 +992,13 @@ export async function generatePdfDocument(
   const styleProfile: PdfStyleProfile = 'FORMAL_NEUTRAL';
   const dateString = formatOfficialDate(school, context.documentDate);
 
+  const isAnnualScopeDoc =
+    type === 'CP' ||
+    type === 'TP' ||
+    type === 'ATP' ||
+    type === 'PROTA' ||
+    type === 'ANALISIS_CP_TP';
+
   const builder = buildPdfFromOptions({
     orientation,
     styleProfile,
@@ -997,6 +1011,7 @@ export async function generatePdfDocument(
     showSignature: true,
     isBlankMode,
     dateString,
+    scope: isAnnualScopeDoc ? 'YEAR' : 'SEMESTER',
   });
 
   const blob = builder.getBlob();

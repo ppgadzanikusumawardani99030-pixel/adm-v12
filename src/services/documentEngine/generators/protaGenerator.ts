@@ -24,6 +24,7 @@ import {
   DOCX_COLOR_BLACK,
 } from '../docxStyles';
 import { getSubjectJP, normalizeLearningAllocation } from '../../jpEngine';
+import { normalizeSemester } from '../../academicScope';
 
 export async function generatePROTA(context: DocumentGenerationContext): Promise<GeneratedDocumentResult> {
   const { school, profile, academicSetting, atp, cp, timeAllocations } = context;
@@ -54,11 +55,17 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
 
   // 2. Identity Box with Provenance Metadata
   docChildren.push(
-    createIdentityMetadataTable(school, profile, academicSetting, [
-      ['Alokasi Intrakurikuler per Minggu', `: ${weeklyJP !== null ? `${weeklyJP} JP / Minggu` : 'Input Manual Diperlukan'}`],
-      ['Total Alokasi Waktu Tahunan Resmi', `: ${annualJP !== null ? `${annualJP} JP / Tahun` : 'Belum Diverifikasi'}`],
-      ['Dasar Regulasi Struktur Kurikulum', `: ${officialRule.regulation || 'Struktur Kustom Guru'}`],
-    ])
+    createIdentityMetadataTable(
+      school,
+      profile,
+      academicSetting,
+      [
+        ['Alokasi Intrakurikuler per Minggu', `: ${weeklyJP !== null ? `${weeklyJP} JP / Minggu` : 'Input Manual Diperlukan'}`],
+        ['Total Alokasi Waktu Tahunan Resmi', `: ${annualJP !== null ? `${annualJP} JP / Tahun` : 'Belum Diverifikasi'}`],
+        ['Dasar Regulasi Struktur Kurikulum', `: ${officialRule.regulation || 'Struktur Kustom Guru'}`],
+      ],
+      { scope: 'YEAR' }
+    )
   );
   docChildren.push(new Paragraph({ spacing: { after: 180 } }));
 
@@ -121,7 +128,9 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
         totalAllocatedJPSum += allocatedJP;
       }
 
-      const itemSemester = matchingAlloc?.semester === '2' ? 'Semester 2 (Genap)' : 'Semester 1 (Ganjil)';
+      const rawSem = matchingAlloc?.semester ?? (item as any)?.semester;
+      const normalizedSem = normalizeSemester(rawSem);
+      const itemSemester = normalizedSem === 2 ? 'Semester 2 (Genap)' : normalizedSem === 1 ? 'Semester 1 (Ganjil)' : '—';
 
       return new TableRow({
         children: [
@@ -145,7 +154,9 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
         totalAllocatedJPSum += allocatedJP;
       }
 
-      const itemSemester = matchingAlloc?.semester === '2' ? 'Semester 2 (Genap)' : 'Semester 1 (Ganjil)';
+      const rawSem = matchingAlloc?.semester ?? (item as any)?.semester;
+      const normalizedSem = normalizeSemester(rawSem);
+      const itemSemester = normalizedSem === 2 ? 'Semester 2 (Genap)' : normalizedSem === 1 ? 'Semester 1 (Ganjil)' : '—';
 
       return new TableRow({
         children: [
@@ -178,6 +189,8 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
   assessmentAllocs.forEach((aAlloc) => {
     const aJp = aAlloc.allocatedJP || 0;
     totalAllocatedJPSum += aJp;
+    const aSem = normalizeSemester(aAlloc.semester);
+    const aSemesterDisplay = aSem === 2 ? 'Semester 2 (Genap)' : aSem === 1 ? 'Semester 1 (Ganjil)' : '—';
     tableDataRows.push(
       new TableRow({
         children: [
@@ -185,7 +198,7 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
           createTableDataCell('ASESMEN', isK13Curriculum ? 30 : 14, AlignmentType.CENTER, true),
           createTableDataCell(aAlloc.notes || 'Asesmen Sumatif / Evaluasi Pembelajaran', isK13Curriculum ? 34 : 50, AlignmentType.LEFT),
           createTableDataCell(`${aJp} JP`, 15, AlignmentType.CENTER, true),
-          createTableDataCell(aAlloc.semester === '2' ? 'Semester 2 (Genap)' : 'Semester 1 (Ganjil)', 15, AlignmentType.CENTER),
+          createTableDataCell(aSemesterDisplay, 15, AlignmentType.CENTER),
         ],
       })
     );

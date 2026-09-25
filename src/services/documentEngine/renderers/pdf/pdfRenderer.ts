@@ -71,6 +71,8 @@ export interface PdfDocumentOptions {
   showSignature?: boolean;
   dateString?: string;
   isBlankMode?: boolean;
+  scope?: 'YEAR' | 'SEMESTER';
+  hideSemester?: boolean;
 }
 
 /**
@@ -166,7 +168,8 @@ export class PdfDocumentBuilder {
     school: SchoolData,
     profile: TeacherProfile,
     academicSetting: AcademicSetting,
-    extraRows: [string, string][] = []
+    extraRows: [string, string][] = [],
+    options?: { scope?: 'YEAR' | 'SEMESTER'; hideSemester?: boolean }
   ): void {
     const isK13Curriculum =
       academicSetting.curriculumType === 'K13' ||
@@ -177,6 +180,11 @@ export class PdfDocumentBuilder {
     const classValue = isK13Curriculum
       ? `: ${academicSetting.grade || '-'}`
       : `: ${academicSetting.phase || '-'} / ${academicSetting.grade || '-'}`;
+
+    const hideSemester = options?.scope === 'YEAR' || options?.hideSemester;
+    const academicYearValue = hideSemester
+      ? `: ${academicSetting.academicYear || '-'}`
+      : `: ${academicSetting.academicYear || '-'} (${academicSetting.semester || '-'})`;
 
     const rows: [string, string, string, string][] = [
       [
@@ -195,7 +203,7 @@ export class PdfDocumentBuilder {
         'Alamat',
         `: ${school.address || '-'}`,
         'Tahun Ajaran',
-        `: ${academicSetting.academicYear || '-'} (${academicSetting.semester || '-'})`,
+        academicYearValue,
       ],
       [
         'Guru Pengampu',
@@ -736,7 +744,8 @@ export function buildPdfFromOptions(options: PdfDocumentOptions): PdfDocumentBui
     options.school,
     options.profile,
     options.academicSetting,
-    options.extraIdentityRows
+    options.extraIdentityRows,
+    { scope: options.scope, hideSemester: options.hideSemester }
   );
 
   // 3. Render Sections

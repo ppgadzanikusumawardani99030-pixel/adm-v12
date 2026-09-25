@@ -235,7 +235,8 @@ export function createIdentityMetadataTable(
   school: SchoolData,
   profile: TeacherProfile,
   academicSetting: AcademicSetting,
-  extraRows: [string, string][] = []
+  extraRows: [string, string][] = [],
+  options?: { scope?: 'YEAR' | 'SEMESTER'; hideSemester?: boolean }
 ): Table {
   const isK13Curriculum =
     academicSetting.curriculumType === 'K13' ||
@@ -246,6 +247,11 @@ export function createIdentityMetadataTable(
     ? ['Kelas', `: ${academicSetting.grade || '-'}`]
     : ['Fase / Kelas', `: ${academicSetting.phase || '-'} / ${academicSetting.grade || '-'}`];
 
+  const hideSemester = options?.scope === 'YEAR' || options?.hideSemester;
+  const periodRow: [string, string] = hideSemester
+    ? ['Tahun Ajaran', `: ${academicSetting.academicYear || '-'}`]
+    : ['Tahun Ajaran / Semester', `: ${academicSetting.academicYear || '-'} / ${academicSetting.semester || '-'}`];
+
   const baseRows: [string, string][] = [
     ['Satuan Pendidikan', `: ${school.name || '-'}`],
     ['NPSN', `: ${school.npsn || '-'}`],
@@ -253,7 +259,7 @@ export function createIdentityMetadataTable(
     ['Kurikulum', `: ${academicSetting.curriculum || '-'}`],
     ['Mata Pelajaran', `: ${academicSetting.subject || '-'}`],
     classRow,
-    ['Tahun Ajaran / Semester', `: ${academicSetting.academicYear || '-'} / ${academicSetting.semester || '-'}`],
+    periodRow,
     ['Guru Mata Pelajaran', `: ${profile.name || '-'}`],
     ['NIP Guru', `: ${profile.nip || '-'}`],
     ...extraRows,

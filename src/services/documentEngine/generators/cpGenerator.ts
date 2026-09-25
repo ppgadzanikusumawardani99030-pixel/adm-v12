@@ -37,7 +37,7 @@ export async function generateCP(
   );
 
   // 2. Metadata Tabel Identitas
-  docChildren.push(createIdentityMetadataTable(school, profile, academicSetting));
+  docChildren.push(createIdentityMetadataTable(school, profile, academicSetting, [], { scope: 'YEAR' }));
   docChildren.push(new Paragraph({ spacing: { after: 180 } }));
 
   // 3. Sumber Rujukan Resmi (bila ada)
