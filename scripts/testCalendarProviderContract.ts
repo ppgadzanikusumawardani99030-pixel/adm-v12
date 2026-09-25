@@ -318,16 +318,149 @@ runTest('I. Provenance check: Missing authority or sourceUrl evaluates to UNRESO
 });
 
 // =========================================================================
-// TEST J: Normalization helper handles tolerant region naming
+// TEST J: Normalization helper handles tolerant region naming & preserves Kab/Kota distinction
 // =========================================================================
 runTest('J. Region normalization: Tolerant matching for Kab, Kota, Prov prefixes', () => {
-  assert.strictEqual(normalizeRegionName('Kabupaten Bandung'), 'bandung');
-  assert.strictEqual(normalizeRegionName('kab. bandung'), 'bandung');
-  assert.strictEqual(normalizeRegionName('Kab Bandung'), 'bandung');
-  assert.strictEqual(normalizeRegionName('Kota Bandung'), 'bandung');
+  assert.strictEqual(normalizeRegionName('Kabupaten Bandung'), 'kabupaten bandung');
+  assert.strictEqual(normalizeRegionName('kab. bandung'), 'kabupaten bandung');
+  assert.strictEqual(normalizeRegionName('Kab Bandung'), 'kabupaten bandung');
+  assert.strictEqual(normalizeRegionName('Kota Bandung'), 'kota bandung');
   assert.strictEqual(normalizeRegionName('Provinsi Jawa Barat'), 'jawa barat');
   assert.strictEqual(normalizeRegionName('prov. jawa barat'), 'jawa barat');
   assert.strictEqual(normalizeRegionName('Jawa Barat'), 'jawa barat');
+  assert.strictEqual(normalizeRegionName('Bandung'), 'bandung');
+});
+
+// =========================================================================
+// TEST K: Kabupaten vs Kota collision (Request Kabupaten Bandung -> picks Kabupaten, not Kota)
+// =========================================================================
+runTest('K. Regency vs City distinction: Request for Kabupaten Bandung selects Kabupaten, not Kota Bandung', () => {
+  const req: CalendarSearchRequest = {
+    academicYear: '2026/2027',
+    semester: 1,
+    province: 'Jawa Barat',
+    regency: 'Kabupaten Bandung',
+  };
+
+  const kotaCand: CalendarSourceCandidate = {
+    sourceLevel: 'REGENCY',
+    province: 'Jawa Barat',
+    regency: 'Kota Bandung',
+    academicYear: '2026/2027',
+    authority: 'Disdik Kota Bandung',
+    documentTitle: 'Kaldik Kota Bandung',
+    sourceUrl: 'https://example.com/kaldik-kota-bandung',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const kabCand: CalendarSourceCandidate = {
+    sourceLevel: 'REGENCY',
+    province: 'Jawa Barat',
+    regency: 'Kabupaten Bandung',
+    academicYear: '2026/2027',
+    authority: 'Disdik Kab Bandung',
+    documentTitle: 'Kaldik Kab Bandung',
+    sourceUrl: 'https://example.com/kaldik-kab-bandung',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const provCand: CalendarSourceCandidate = {
+    sourceLevel: 'PROVINCE',
+    province: 'Jawa Barat',
+    academicYear: '2026/2027',
+    authority: 'Disdik Jabar',
+    documentTitle: 'Kaldik Jabar',
+    sourceUrl: 'https://example.com/kaldik-jabar',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const selected = selectBestCalendarSource([kotaCand, kabCand, provCand], req);
+  assert.notStrictEqual(selected, null);
+  assert.strictEqual(selected?.regency, 'Kabupaten Bandung');
+});
+
+// =========================================================================
+// TEST L: Kota vs Kabupaten collision (Request Kota Bandung -> picks Kota, not Kabupaten)
+// =========================================================================
+runTest('L. City vs Regency distinction: Request for Kota Bandung selects Kota, not Kabupaten Bandung', () => {
+  const req: CalendarSearchRequest = {
+    academicYear: '2026/2027',
+    semester: 1,
+    province: 'Jawa Barat',
+    regency: 'Kota Bandung',
+  };
+
+  const kabCand: CalendarSourceCandidate = {
+    sourceLevel: 'REGENCY',
+    province: 'Jawa Barat',
+    regency: 'Kabupaten Bandung',
+    academicYear: '2026/2027',
+    authority: 'Disdik Kab Bandung',
+    documentTitle: 'Kaldik Kab Bandung',
+    sourceUrl: 'https://example.com/kaldik-kab-bandung',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const kotaCand: CalendarSourceCandidate = {
+    sourceLevel: 'REGENCY',
+    province: 'Jawa Barat',
+    regency: 'Kota Bandung',
+    academicYear: '2026/2027',
+    authority: 'Disdik Kota Bandung',
+    documentTitle: 'Kaldik Kota Bandung',
+    sourceUrl: 'https://example.com/kaldik-kota-bandung',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const selected = selectBestCalendarSource([kabCand, kotaCand], req);
+  assert.notStrictEqual(selected, null);
+  assert.strictEqual(selected?.regency, 'Kota Bandung');
+});
+
+// =========================================================================
+// TEST M: Missing candidate province fails closed when request has province
+// =========================================================================
+runTest('M. Fail-closed province matching: REGENCY candidate with missing province is rejected and falls back to PROVINCE', () => {
+  const req: CalendarSearchRequest = {
+    academicYear: '2026/2027',
+    semester: 1,
+    province: 'Jawa Barat',
+    regency: 'Kabupaten Bandung',
+  };
+
+  const noProvRegencyCand: CalendarSourceCandidate = {
+    sourceLevel: 'REGENCY',
+    regency: 'Kabupaten Bandung',
+    province: undefined,
+    academicYear: '2026/2027',
+    authority: 'Disdik Kab Bandung',
+    documentTitle: 'Kaldik Kab Bandung',
+    sourceUrl: 'https://example.com/kaldik-kab-bandung',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const provCand: CalendarSourceCandidate = {
+    sourceLevel: 'PROVINCE',
+    province: 'Jawa Barat',
+    academicYear: '2026/2027',
+    authority: 'Disdik Jabar',
+    documentTitle: 'Kaldik Jabar',
+    sourceUrl: 'https://example.com/kaldik-jabar',
+    verificationStatus: 'VERIFIED',
+    retrievedAt: '2026-07-20T08:00:00Z',
+  };
+
+  const selected = selectBestCalendarSource([noProvRegencyCand, provCand], req);
+  assert.notStrictEqual(selected, null);
+  // Must reject the regency candidate with missing province and fallback to PROVINCE
+  assert.strictEqual(selected?.sourceLevel, 'PROVINCE');
+  assert.strictEqual(selected?.province, 'Jawa Barat');
 });
 
 console.log(`\n========================================`);

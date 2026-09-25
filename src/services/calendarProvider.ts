@@ -106,22 +106,34 @@ export function getCalendarSourcePriority(
 
 /**
  * Normalizes administrative region names for tolerant string matching.
- * Removes common regional prefixes like "Kabupaten", "Kab.", "Kota", "Provinsi", "Prov."
+ * Preserves the distinction between 'kabupaten' and 'kota' while standardizing abbreviation variants.
+ * Removes 'provinsi' prefix for province names.
  */
 export function normalizeRegionName(value?: string): string {
   if (!value) return '';
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^kabupaten\s+/i, '')
-    .replace(/^kab\.\s*/i, '')
-    .replace(/^kab\s+/i, '')
-    .replace(/^kota\s+/i, '')
+  let str = value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+  // Standardize province prefixes: remove 'provinsi', 'prov.', 'prov '
+  str = str
     .replace(/^provinsi\s+/i, '')
     .replace(/^prov\.\s*/i, '')
-    .replace(/^prov\s+/i, '')
-    .trim()
-    .replace(/\s+/g, ' ');
+    .replace(/^prov\s+/i, '');
+
+  // Standardize regency prefixes to canonical 'kabupaten '
+  if (/^kabupaten\s+/i.test(str)) {
+    str = 'kabupaten ' + str.replace(/^kabupaten\s+/i, '');
+  } else if (/^kab\.\s*/i.test(str)) {
+    str = 'kabupaten ' + str.replace(/^kab\.\s*/i, '');
+  } else if (/^kab\s+/i.test(str)) {
+    str = 'kabupaten ' + str.replace(/^kab\s+/i, '');
+  }
+
+  // Standardize city prefixes
+  if (/^kota\.\s*/i.test(str)) {
+    str = 'kota ' + str.replace(/^kota\.\s*/i, '');
+  }
+
+  return str.trim().replace(/\s+/g, ' ');
 }
 
 /**
@@ -173,9 +185,9 @@ export function selectBestCalendarSource(
       const cRegency = normalizeRegionName(c.regency);
       if (!cRegency || cRegency !== reqRegency) return false;
 
-      if (reqProvince && c.province) {
+      if (reqProvince) {
         const cProvince = normalizeRegionName(c.province);
-        if (cProvince && cProvince !== reqProvince) return false;
+        if (!cProvince || cProvince !== reqProvince) return false;
       }
       return true;
     });
