@@ -2008,4 +2008,200 @@ export function deleteWorkspaceV5(workspaceId: string): void {
   saveStorageV5(state);
 }
 
+// ============================================================================
+// HIERARCHY DUPLICATE API
+// ============================================================================
+
+export interface DuplicateYearHierarchyV5Overrides {
+  academicYear?: string;
+  grade?: string;
+  classSection?: string;
+  subject?: string;
+  subjectCode?: string;
+  phase?: string;
+  workspaceName?: string;
+  documentDate?: string;
+}
+
+export function duplicateYearHierarchyV5(
+  sourceYearPlanId: string,
+  overrides?: DuplicateYearHierarchyV5Overrides
+): CreateYearHierarchyV5Result {
+  const state = loadStorageV5();
+
+  // 1. Source Validation
+  const sourceYP = state.yearPlans.find((yp) => yp.id === sourceYearPlanId);
+  if (!sourceYP) {
+    throw new Error(`Source YearPlan with ID "${sourceYearPlanId}" not found`);
+  }
+
+  if (sourceYP.curriculumType === 'K13') {
+    throw new Error(
+      `K13 hierarchy duplication is not supported in V5. Only KURIKULUM_MERDEKA is supported.`
+    );
+  }
+
+  const parentWorkspaces = state.workspaces.filter((ws) => ws.yearPlanId === sourceYearPlanId);
+  if (parentWorkspaces.length !== 1) {
+    throw new Error(
+      `Source YearPlan "${sourceYearPlanId}" must have exactly 1 parent Workspace (found ${parentWorkspaces.length})`
+    );
+  }
+  const sourceWorkspace = parentWorkspaces[0];
+
+  const semesterPlans = state.semesterPlans.filter((sp) => sp.yearPlanId === sourceYearPlanId);
+  const sem1 = semesterPlans.find((sp) => Number(sp.semester) === 1);
+  const sem2 = semesterPlans.find((sp) => Number(sp.semester) === 2);
+  if (!sem1 || !sem2 || semesterPlans.length !== 2) {
+    throw new Error(
+      `Source YearPlan "${sourceYearPlanId}" must have exactly 1 SemesterPlan for Semester 1 and 1 for Semester 2`
+    );
+  }
+
+  const profile = state.profiles.find((p) => p.id === sourceYP.profileId);
+  if (!profile) {
+    throw new Error(`Profile with ID "${sourceYP.profileId}" not found`);
+  }
+
+  const school = state.schools.find((s) => s.id === sourceYP.schoolId);
+  if (!school) {
+    throw new Error(`School with ID "${sourceYP.schoolId}" not found`);
+  }
+
+  // 2. Resolve Overrides
+  const targetAcademicYear =
+    overrides?.academicYear !== undefined
+      ? overrides.academicYear.trim()
+      : sourceYP.academicYear;
+
+  const targetGrade =
+    overrides?.grade !== undefined ? overrides.grade.trim() : sourceYP.grade;
+
+  const targetClassSection =
+    overrides?.classSection !== undefined
+      ? (overrides.classSection.trim() || undefined)
+      : sourceYP.classSection;
+
+  const targetSubject =
+    overrides?.subject !== undefined ? overrides.subject.trim() : sourceYP.subject;
+
+  const targetSubjectCode =
+    overrides?.subjectCode !== undefined
+      ? (overrides.subjectCode.trim() || undefined)
+      : sourceYP.subjectCode;
+
+  const targetPhase =
+    overrides?.phase !== undefined
+      ? (overrides.phase.trim() || undefined)
+      : sourceYP.phase;
+
+  // 3. Duplicate Identity Guard
+  const isDuplicate = state.yearPlans.some(
+    (yp) =>
+      yp.profileId === sourceYP.profileId &&
+      yp.schoolId === sourceYP.schoolId &&
+      yp.academicYear === targetAcademicYear &&
+      yp.grade === targetGrade &&
+      (yp.classSection || '') === (targetClassSection || '') &&
+      yp.subject.trim().toLowerCase() === targetSubject.trim().toLowerCase()
+  );
+
+  if (isDuplicate) {
+    throw new Error(
+      `Duplicate YearPlan: A YearPlan already exists for profileId "${sourceYP.profileId}", schoolId "${sourceYP.schoolId}", academicYear "${targetAcademicYear}", grade "${targetGrade}", classSection "${targetClassSection || ''}", and subject "${targetSubject}".`
+    );
+  }
+
+  // 4. Create New YearPlan
+  const now = new Date().toISOString();
+  const newYearPlanId = `yp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const newYearPlan: YearPlan = {
+    id: newYearPlanId,
+    profileId: sourceYP.profileId,
+    schoolId: sourceYP.schoolId,
+    academicYear: targetAcademicYear,
+    curriculumType: sourceYP.curriculumType,
+    level: sourceYP.level,
+    grade: targetGrade,
+    ...(targetClassSection !== undefined ? { classSection: targetClassSection } : {}),
+    subject: targetSubject,
+    ...(targetSubjectCode !== undefined ? { subjectCode: targetSubjectCode } : {}),
+    ...(targetPhase !== undefined ? { phase: targetPhase } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // 5. Create New Workspace
+  const newWorkspaceId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const targetWorkspaceName =
+    overrides?.workspaceName !== undefined && overrides.workspaceName.trim() !== ''
+      ? overrides.workspaceName.trim()
+      : `${targetSubject} - ${targetGrade} (${targetAcademicYear})`;
+
+  const targetDocumentDate =
+    overrides?.documentDate !== undefined
+      ? (overrides.documentDate.trim() || undefined)
+      : sourceWorkspace.documentDate;
+
+  const newWorkspace: AdministrationWorkspaceV5 = {
+    id: newWorkspaceId,
+    profileId: sourceYP.profileId,
+    schoolId: sourceYP.schoolId,
+    yearPlanId: newYearPlanId,
+    name: targetWorkspaceName,
+    ...(targetDocumentDate !== undefined ? { documentDate: targetDocumentDate } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // 6. Create New Semester Plans
+  const newSemesterPlan1: SemesterPlan = {
+    id: `sp-${Date.now()}-1-${Math.random().toString(36).slice(2, 9)}`,
+    yearPlanId: newYearPlanId,
+    semester: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const newSemesterPlan2: SemesterPlan = {
+    id: `sp-${Date.now()}-2-${Math.random().toString(36).slice(2, 9)}`,
+    yearPlanId: newYearPlanId,
+    semester: 2,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  state.yearPlans.push(newYearPlan);
+  state.workspaces.push(newWorkspace);
+  state.semesterPlans.push(newSemesterPlan1, newSemesterPlan2);
+
+  // 7. Active Context Pointer Update
+  state.activeProfileId = sourceYP.profileId;
+  state.activeYearPlanId = newYearPlanId;
+  state.activeWorkspaceId = newWorkspaceId;
+  state.activeSemesterPlanId = undefined;
+
+  saveStorageV5(state);
+
+  return {
+    yearPlan: newYearPlan,
+    workspace: newWorkspace,
+    semesterPlans: [newSemesterPlan1, newSemesterPlan2],
+  };
+}
+
+export function duplicateWorkspaceV5(
+  sourceWorkspaceId: string,
+  overrides?: DuplicateYearHierarchyV5Overrides
+): CreateYearHierarchyV5Result {
+  const state = loadStorageV5();
+  const ws = state.workspaces.find((w) => w.id === sourceWorkspaceId);
+  if (!ws) {
+    throw new Error(`Workspace with ID "${sourceWorkspaceId}" not found`);
+  }
+  return duplicateYearHierarchyV5(ws.yearPlanId, overrides);
+}
+
 
