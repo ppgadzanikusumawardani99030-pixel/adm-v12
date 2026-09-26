@@ -60,3 +60,6 @@ jobs:
 
       - name: Run Linter
         run: npm run lint
+
+      - name: Build Production
+        run: npm run build
