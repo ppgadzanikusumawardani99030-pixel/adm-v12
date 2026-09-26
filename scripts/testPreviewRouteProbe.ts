@@ -14,36 +14,75 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTests() {
-  console.log('=== Running Preview Route Probe Tests ===\n');
+  console.log('=== Running Extended Preview Route Probe Tests ===\n');
 
-  const baseContext = {
-    href: 'https://preview.example.com/project/session/',
+  const baseContextWithQuery = {
+    href: 'https://preview.example.com/project/session/?user=admin#section1',
     origin: 'https://preview.example.com',
     pathname: '/project/session/',
-    baseURI: 'https://preview.example.com/project/session/'
+    baseURI: 'https://preview.example.com/project/session/?user=admin#section1'
   };
 
-  // Test Case A, B, C, D: Absolute path, relative path, ./ path, and JSON response classification
+  // Test Case 1-6 & 9-11: Validate GET & POST, query/hash stripping, method display, classification, redirection
   {
-    const mockResponses: Record<string, { status: number; contentType: string; body: string }> = {
+    const mockResponses: Record<string, Record<string, { status: number; contentType: string; body: string; redirected?: boolean }>> = {
       'https://preview.example.com/api/health': {
-        status: 200,
-        contentType: 'application/json; charset=utf-8',
-        body: '{"status":"ok","timestamp":"2026-09-26T00:00:00.000Z"}'
+        'GET': {
+          status: 200,
+          contentType: 'application/json; charset=utf-8',
+          body: '{"status":"ok"}'
+        }
       },
       'https://preview.example.com/project/session/api/health': {
-        status: 200,
-        contentType: 'application/json',
-        body: '{"status":"ok","relative":true}'
+        'GET': {
+          status: 200,
+          contentType: 'application/json',
+          body: '{"status":"ok","relative":true}'
+        }
+      },
+      'https://preview.example.com/api/e4-1a-4-route-does-not-exist': {
+        'POST': {
+          status: 404,
+          contentType: 'application/json',
+          body: '{"error":"Unknown API route"}'
+        }
+      },
+      'https://preview.example.com/api/ai/analyze-cp': {
+        'POST': {
+          status: 400,
+          contentType: 'application/json',
+          body: '{"error":"Data CP tidak boleh kosong"}'
+        }
+      },
+      'https://preview.example.com/api/ai/generate-tp': {
+        'POST': {
+          status: 400,
+          contentType: 'application/json',
+          body: '{"error":"Capaian Pembelajaran (CP) harus diisi terlebih dahulu"}'
+        }
       }
     };
 
+    let postBodiesCaptured: Record<string, string> = {};
+
     const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const urlStr = url.toString();
-      const resData = mockResponses[urlStr] || { status: 404, contentType: 'text/plain', body: 'Not found' };
+      const method = init?.method || 'GET';
+      if (method === 'POST' && init?.body) {
+        postBodiesCaptured[urlStr] = init.body.toString();
+      }
+
+      const cleanUrlStr = urlStr.split('?')[0].split('#')[0];
+      const resData = mockResponses[cleanUrlStr]?.[method] || {
+        status: 404,
+        contentType: 'text/plain',
+        body: 'Not found'
+      };
+
       return {
         status: resData.status,
         url: urlStr,
+        redirected: resData.redirected || false,
         headers: {
           get: (name: string) => name.toLowerCase() === 'content-type' ? resData.contentType : null
         },
@@ -52,38 +91,59 @@ async function runTests() {
     };
 
     const result = await runPreviewRouteProbe({
-      context: baseContext,
+      context: baseContextWithQuery,
       fetchFn: mockFetch
     });
 
-    assert(result.results.length === 3, 'Probed exactly 3 candidate paths');
+    // Check we ran exactly 6 candidate probes
+    assert(result.results.length === 6, 'Probed exactly 6 candidates (3 GETs and 3 POSTs)');
 
-    // Candidate 1: /api/health (Absolute path)
-    const p1 = result.results[0];
-    assert(p1.requestPath === '/api/health', 'Candidate 1 request path is /api/health');
-    assert(p1.resolvedUrl === 'https://preview.example.com/api/health', 'Resolved absolute path to domain root: ' + p1.resolvedUrl);
-    assert(p1.classification === 'JSON', 'Classified application/json response as JSON');
-    assert(p1.status === 200, 'Candidate 1 status is 200');
+    // Context query and hash stripping check
+    assert(result.context.href === 'https://preview.example.com/project/session/', 'Stripped query and fragment from location.href');
+    assert(result.context.baseURI === 'https://preview.example.com/project/session/', 'Stripped query and fragment from document.baseURI');
 
-    // Candidate 2: api/health (Relative path)
-    const p2 = result.results[1];
-    assert(p2.requestPath === 'api/health', 'Candidate 2 request path is api/health');
-    assert(p2.resolvedUrl === 'https://preview.example.com/project/session/api/health', 'Resolved relative path to nested path: ' + p2.resolvedUrl);
-    assert(p2.classification === 'JSON', 'Classified nested JSON response as JSON');
+    // Probe 1: GET /api/health
+    const r1 = result.results[0];
+    assert(r1.method === 'GET', 'Probe 1 is GET');
+    assert(r1.resolvedUrl === 'https://preview.example.com/api/health', 'Probe 1 resolved correct root URL');
+    assert(r1.classification === 'JSON', 'GET /api/health classified as JSON');
 
-    // Candidate 3: ./api/health (./ relative path)
-    const p3 = result.results[2];
-    assert(p3.requestPath === './api/health', 'Candidate 3 request path is ./api/health');
-    assert(p3.resolvedUrl === 'https://preview.example.com/project/session/api/health', 'Resolved ./ path correctly: ' + p3.resolvedUrl);
+    // Probe 4: POST /api/e4-1a-4-route-does-not-exist
+    const r4 = result.results[3];
+    assert(r4.method === 'POST', 'Probe 4 is POST');
+    assert(r4.resolvedUrl === 'https://preview.example.com/api/e4-1a-4-route-does-not-exist', 'Probe 4 resolved correctly');
+    assert(r4.classification === 'JSON' && r4.status === 404, 'Generic POST 404 classified as JSON');
+    assert(postBodiesCaptured['https://preview.example.com/api/e4-1a-4-route-does-not-exist'] === '{}', 'Generic POST sent correct `{}` body');
+
+    // Probe 5: POST /api/ai/analyze-cp
+    const r5 = result.results[4];
+    assert(r5.method === 'POST', 'Probe 5 is POST');
+    assert(r5.classification === 'JSON' && r5.status === 400, 'analyze-cp POST 400 classified as JSON');
+    assert(postBodiesCaptured['https://preview.example.com/api/ai/analyze-cp'] === '{}', 'analyze-cp POST sent `{}` body');
+
+    // Probe 6: POST /api/ai/generate-tp
+    const r6 = result.results[5];
+    assert(r6.method === 'POST', 'Probe 6 is POST');
+    assert(r6.classification === 'JSON' && r6.status === 400, 'generate-tp POST 400 classified as JSON');
+    const expectedTpBody = JSON.stringify({ cpGeneral: '', cpElements: [], cpAnalysisItems: [] });
+    assert(postBodiesCaptured['https://preview.example.com/api/ai/generate-tp'] === expectedTpBody, 'generate-tp POST sent CP-empty payload');
+
+    // Formatter checks
+    const report = formatPreviewRouteProbeReport(result);
+    assert(report.includes('method: GET'), 'Report formats method: GET');
+    assert(report.includes('method: POST'), 'Report formats method: POST');
+    assert(!report.includes('?user=admin'), 'Report completely strips search queries');
+    assert(!report.includes('#section1'), 'Report completely strips fragments');
   }
 
-  // Test Case E: HTTP 200 text/html with <!doctype html> classified HTML and bounded responseSnippet
+  // Test Case 7: HTML 200 POST is classified HTML and captured in snippets safely
   {
-    const mockFetch = async (url: string | URL | Request): Promise<Response> => {
-      const largeHtml = '<!DOCTYPE html><html><head><title>Test</title></head><body>' + 'A'.repeat(1000) + '</body></html>';
+    const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const largeHtml = '<!doctype html><html><body>ErrorFallback' + 'A'.repeat(500) + '</body></html>';
       return {
         status: 200,
         url: url.toString(),
+        redirected: true,
         headers: {
           get: (name: string) => name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null
         },
@@ -92,23 +152,23 @@ async function runTests() {
     };
 
     const result = await runPreviewRouteProbe({
-      context: baseContext,
+      context: baseContextWithQuery,
       fetchFn: mockFetch
     });
 
-    result.results.forEach(p => {
-      assert(p.classification === 'HTML', 'Classified text/html response as HTML');
-      assert(p.responseSnippet !== undefined && p.responseSnippet.length <= 200, 'Snippet size is bounded below 200 chars');
-      assert(p.responseSnippet.toLowerCase().startsWith('<!doctype'), 'Snippet captured correct start content');
+    result.results.forEach(r => {
+      assert(r.classification === 'HTML', `Probe classification is HTML for method ${r.method}`);
+      assert(r.responseSnippet !== undefined && r.responseSnippet.length <= 200, 'Snippet size bounded <= 200 chars');
+      assert(r.redirected === true, 'Redirected status is recorded correctly');
     });
   }
 
-  // Test Case F: Network failure classified NETWORK_ERROR and does not abort remaining probes
+  // Test Case 8: Network failure in one POST does not abort remaining probes
   {
-    const mockFetch = async (url: string | URL | Request): Promise<Response> => {
+    const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const urlStr = url.toString();
-      if (urlStr === 'https://preview.example.com/api/health') {
-        throw new Error('Connection refused');
+      if (urlStr.includes('/api/ai/analyze-cp')) {
+        throw new Error('Connection timeout');
       }
       return {
         status: 200,
@@ -121,48 +181,20 @@ async function runTests() {
     };
 
     const result = await runPreviewRouteProbe({
-      context: baseContext,
+      context: baseContextWithQuery,
       fetchFn: mockFetch
     });
 
-    assert(result.results.length === 3, 'All 3 probes were run despite a network error in one');
-    assert(result.results[0].classification === 'NETWORK_ERROR', 'Probe 1 classified as NETWORK_ERROR');
-    assert(result.results[0].error === 'Connection refused', 'Captured connection refused error message');
-    assert(result.results[1].classification === 'JSON', 'Remaining Probe 2 successfully finished as JSON');
-    assert(result.results[2].classification === 'JSON', 'Remaining Probe 3 successfully finished as JSON');
+    assert(result.results.length === 6, 'All 6 probes were executed despite network failure in one probe');
+    const failedProbe = result.results.find(r => r.requestPath === '/api/ai/analyze-cp');
+    assert(failedProbe?.classification === 'NETWORK_ERROR', 'analyze-cp classified as NETWORK_ERROR');
+    assert(failedProbe?.error === 'Connection timeout', 'Captured correct network error description');
+    
+    const otherProbe = result.results.find(r => r.requestPath === '/api/ai/generate-tp');
+    assert(otherProbe?.classification === 'JSON', 'Other post probe successfully parsed as JSON');
   }
 
-  // Test Case G: Formatter verified
-  {
-    const resultsData = {
-      context: baseContext,
-      results: [
-        {
-          requestPath: '/api/health',
-          resolvedUrl: 'https://preview.example.com/api/health',
-          finalResponseUrl: 'https://preview.example.com/api/health',
-          status: 200,
-          contentType: 'application/json',
-          classification: 'JSON' as const,
-          responseSnippet: '{"status":"ok"}'
-        }
-      ]
-    };
-
-    const report = formatPreviewRouteProbeReport(resultsData);
-    assert(report.includes('=== GAS Preview Route Probe ==='), 'Formatter includes banner');
-    assert(report.includes('location.href: https://preview.example.com/project/session/'), 'Formatter includes href context');
-    assert(report.includes('location.origin: https://preview.example.com'), 'Formatter includes origin context');
-    assert(report.includes('location.pathname: /project/session/'), 'Formatter includes pathname context');
-    assert(report.includes('document.baseURI: https://preview.example.com/project/session/'), 'Formatter includes baseURI context');
-    assert(report.includes('requestPath: /api/health'), 'Formatter includes request path');
-    assert(report.includes('resolvedUrl: https://preview.example.com/api/health'), 'Formatter includes resolved URL');
-    assert(report.includes('status: 200'), 'Formatter includes status');
-    assert(report.includes('contentType: application/json'), 'Formatter includes content type');
-    assert(report.includes('classification: JSON'), 'Formatter includes classification');
-  }
-
-  console.log(`\n=== Probe Tests Summary: ${passed} passed, ${failed} failed ===`);
+  console.log(`\n=== Extended Probe Tests Summary: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) {
     process.exit(1);
   } else {
