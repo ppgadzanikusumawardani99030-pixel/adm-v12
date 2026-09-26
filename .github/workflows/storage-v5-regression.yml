@@ -1,0 +1,41 @@
+name: Storage V5 Regression
+
+on:
+  push:
+    branches: [main]
+
+  pull_request:
+    branches: [main]
+
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Test Storage V5 Hierarchy CRUD
+        run: npx tsx scripts/testStorageV5HierarchyCrud.ts
+
+      - name: Test Storage V5 Persistence
+        run: npx tsx scripts/testStorageV5Persistence.ts
+
+      - name: Test Storage V5 Contract
+        run: npx tsx scripts/testStorageV5Contract.ts
+
+      - name: Test F1 Annual & Semester Scope Contract
+        run: npx tsx scripts/testF1AnnualSemesterScopeContract.ts
+
+      - name: Run Linter
+        run: npm run lint
