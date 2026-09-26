@@ -1038,6 +1038,194 @@ runTest('26. annualData + semesterData byte-for-byte unchanged: Master data oper
   assert.strictEqual(JSON.stringify(finalState.semesterData), initialSemester);
 });
 
+// =========================================================================
+// TEST 27: FIX 1A — hierarchy + explicit undefined
+// =========================================================================
+runTest('27. FIX 1A: hierarchy + explicit undefined schoolId → THROW: Rejects clearing schoolId when hierarchy exists, profile retains old schoolId', () => {
+  resetStorageV5();
+  const sch = createSchoolV5({
+    name: 'SDN 01 Menteng',
+    npsn: '10000001',
+    address: 'Jl. Menteng',
+    village: 'Menteng',
+    district: 'Menteng',
+    regency: 'Jakarta Pusat',
+    province: 'DKI Jakarta',
+    principalName: '',
+    principalNip: '',
+  });
+
+  const profile = createProfileV5({
+    name: 'Budi Santoso',
+    nip: '198501012010011001',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SD',
+    schoolId: sch.id,
+  });
+
+  createYearHierarchyV5({
+    profileId: profile.id,
+    schoolId: sch.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SD',
+    grade: 'Kelas 4',
+    subject: 'Matematika',
+  });
+
+  assert.throws(() => {
+    updateProfileV5(profile.id, { schoolId: undefined });
+  }, /Cannot change schoolId/i);
+
+  const retained = getProfileV5(profile.id)!;
+  assert.strictEqual(retained.schoolId, sch.id);
+});
+
+// =========================================================================
+// TEST 28: FIX 1B — no hierarchy + explicit undefined
+// =========================================================================
+runTest('28. FIX 1B: no hierarchy + explicit undefined schoolId → PASS: Allows clearing schoolId when no hierarchy exists', () => {
+  resetStorageV5();
+  const sch = createSchoolV5({
+    name: 'SDN 01 Menteng',
+    npsn: '10000001',
+    address: 'Jl. Menteng',
+    village: 'Menteng',
+    district: 'Menteng',
+    regency: 'Jakarta Pusat',
+    province: 'DKI Jakarta',
+    principalName: '',
+    principalNip: '',
+  });
+
+  const profile = createProfileV5({
+    name: 'Budi Santoso',
+    nip: '198501012010011001',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SD',
+    schoolId: sch.id,
+  });
+
+  const updated = updateProfileV5(profile.id, { schoolId: undefined });
+  assert.strictEqual(updated.schoolId, undefined);
+  assert.strictEqual(getProfileV5(profile.id)!.schoolId, undefined);
+});
+
+// =========================================================================
+// TEST 29: FIX 2C — empty schoolId normalized to undefined
+// =========================================================================
+runTest('29. FIX 2C: empty schoolId normalized to undefined: Normalizes empty string to undefined without hierarchy and throws with hierarchy', () => {
+  resetStorageV5();
+  const sch = createSchoolV5({
+    name: 'SDN 01 Menteng',
+    npsn: '10000001',
+    address: 'Jl. Menteng',
+    village: 'Menteng',
+    district: 'Menteng',
+    regency: 'Jakarta Pusat',
+    province: 'DKI Jakarta',
+    principalName: '',
+    principalNip: '',
+  });
+
+  const profile = createProfileV5({
+    name: 'Budi Santoso',
+    nip: '198501012010011001',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SD',
+    schoolId: sch.id,
+  });
+
+  // Without hierarchy -> normalizes '' to undefined
+  const updatedNoHierarchy = updateProfileV5(profile.id, { schoolId: '' });
+  assert.strictEqual(updatedNoHierarchy.schoolId, undefined);
+
+  // Set back schoolId
+  updateProfileV5(profile.id, { schoolId: sch.id });
+
+  // Add hierarchy
+  createYearHierarchyV5({
+    profileId: profile.id,
+    schoolId: sch.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SD',
+    grade: 'Kelas 4',
+    subject: 'Matematika',
+  });
+
+  // With hierarchy -> throws when previously had school
+  assert.throws(() => {
+    updateProfileV5(profile.id, { schoolId: '' });
+  }, /Cannot change schoolId/i);
+});
+
+// =========================================================================
+// TEST 30: FIX 3D — setActiveProfile stale pointers
+// =========================================================================
+runTest('30. FIX 3D: setActiveProfile stale pointers: Safely clears stale pointers when activeYearPlanId is undefined', () => {
+  resetStorageV5();
+  const sch = createSchoolV5({
+    name: 'SDN 01 Menteng',
+    npsn: '10000001',
+    address: 'Jl. Menteng',
+    village: 'Menteng',
+    district: 'Menteng',
+    regency: 'Jakarta Pusat',
+    province: 'DKI Jakarta',
+    principalName: '',
+    principalNip: '',
+  });
+
+  const profA = createProfileV5({
+    name: 'Teacher A',
+    nip: '1001',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SD',
+    schoolId: sch.id,
+  });
+
+  const resA = createYearHierarchyV5({
+    profileId: profA.id,
+    schoolId: sch.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SD',
+    grade: 'Kelas 4',
+    subject: 'Matematika',
+  });
+
+  const profB = createProfileV5({
+    name: 'Teacher B',
+    nip: '1002',
+    status: 'PNS',
+    defaultSubject: 'IPA',
+    defaultLevel: 'SD',
+    schoolId: sch.id,
+  });
+
+  // Directly craft state: activeYearPlanId = undefined, activeWorkspaceId = workspace A
+  const state = loadStorageV5();
+  state.activeProfileId = profA.id;
+  state.activeYearPlanId = undefined;
+  state.activeWorkspaceId = resA.workspace.id;
+  state.activeSemesterPlanId = undefined;
+  saveStorageV5(state);
+
+  // Switch active profile to Profile B
+  setActiveProfileV5(profB.id);
+
+  const finalState = loadStorageV5();
+  assert.strictEqual(finalState.activeProfileId, profB.id);
+  assert.strictEqual(finalState.activeYearPlanId, undefined);
+  assert.strictEqual(finalState.activeWorkspaceId, undefined);
+  assert.strictEqual(finalState.activeSemesterPlanId, undefined);
+});
+
 console.log(`\n========================================`);
 console.log(`ALL STORAGE V5 MASTER DATA CRUD TESTS PASSED (${passedTests}/${totalTests})`);
 console.log(`========================================\n`);

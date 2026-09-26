@@ -1525,6 +1525,51 @@ export function deleteEnrichmentV5(semesterPlanId: string): void {
 // PROFILE MASTER DATA API
 // ============================================================================
 
+function setActiveProfileInState(state: AppStorageStateV5, profileId: string): void {
+  const profileExists = state.profiles.some((p) => p.id === profileId);
+  if (!profileExists) {
+    throw new Error(`Profile with ID "${profileId}" not found`);
+  }
+
+  state.activeProfileId = profileId;
+
+  // 1. Validate activeYearPlanId
+  if (state.activeYearPlanId !== undefined) {
+    const activeYP = state.yearPlans.find((yp) => yp.id === state.activeYearPlanId);
+    if (!activeYP || activeYP.profileId !== profileId) {
+      state.activeYearPlanId = undefined;
+    }
+  }
+
+  // 2. Validate activeWorkspaceId
+  if (state.activeWorkspaceId !== undefined) {
+    const activeWS = state.workspaces.find((ws) => ws.id === state.activeWorkspaceId);
+    if (
+      !activeWS ||
+      activeWS.profileId !== profileId ||
+      (state.activeYearPlanId !== undefined && activeWS.yearPlanId !== state.activeYearPlanId)
+    ) {
+      state.activeWorkspaceId = undefined;
+    }
+  }
+
+  // 3. Validate activeSemesterPlanId
+  if (state.activeSemesterPlanId !== undefined) {
+    const activeSP = state.semesterPlans.find((sp) => sp.id === state.activeSemesterPlanId);
+    const parentYP = activeSP
+      ? state.yearPlans.find((yp) => yp.id === activeSP.yearPlanId)
+      : undefined;
+    if (
+      !activeSP ||
+      !parentYP ||
+      parentYP.profileId !== profileId ||
+      (state.activeYearPlanId !== undefined && activeSP.yearPlanId !== state.activeYearPlanId)
+    ) {
+      state.activeSemesterPlanId = undefined;
+    }
+  }
+}
+
 export function getProfileV5(profileId: string): TeacherProfile | undefined {
   const state = loadStorageV5();
   return state.profiles.find((p) => p.id === profileId);
@@ -1535,32 +1580,26 @@ export function createProfileV5(
 ): TeacherProfile {
   const state = loadStorageV5();
 
-  if (profile.schoolId && profile.schoolId.trim() !== '') {
-    const schoolExists = state.schools.some((s) => s.id === profile.schoolId);
+  let targetSchoolId: string | undefined = undefined;
+  if (typeof profile.schoolId === 'string' && profile.schoolId.trim() !== '') {
+    targetSchoolId = profile.schoolId.trim();
+    const schoolExists = state.schools.some((s) => s.id === targetSchoolId);
     if (!schoolExists) {
-      throw new Error(`School with ID "${profile.schoolId}" not found`);
+      throw new Error(`School with ID "${targetSchoolId}" not found`);
     }
   }
 
   const now = new Date().toISOString();
   const newProfile: TeacherProfile = {
     ...profile,
+    schoolId: targetSchoolId,
     id: `prof-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     createdAt: now,
     updatedAt: now,
   };
 
   state.profiles.push(newProfile);
-  state.activeProfileId = newProfile.id;
-
-  if (state.activeYearPlanId) {
-    const activeYP = state.yearPlans.find((yp) => yp.id === state.activeYearPlanId);
-    if (!activeYP || activeYP.profileId !== newProfile.id) {
-      state.activeYearPlanId = undefined;
-      state.activeWorkspaceId = undefined;
-      state.activeSemesterPlanId = undefined;
-    }
-  }
+  setActiveProfileInState(state, newProfile.id);
 
   saveStorageV5(state);
   return newProfile;
@@ -1578,25 +1617,39 @@ export function updateProfileV5(
   }
 
   const existingProfile = state.profiles[index];
+  const hasSchoolIdProp = Object.prototype.hasOwnProperty.call(updates, 'schoolId');
 
-  if (updates.schoolId !== undefined && updates.schoolId.trim() !== '') {
-    const schoolExists = state.schools.some((s) => s.id === updates.schoolId);
-    if (!schoolExists) {
-      throw new Error(`School with ID "${updates.schoolId}" not found`);
+  let targetSchoolId: string | undefined = existingProfile.schoolId;
+
+  if (hasSchoolIdProp) {
+    const rawVal = updates.schoolId;
+    if (typeof rawVal === 'string') {
+      const trimmed = rawVal.trim();
+      targetSchoolId = trimmed === '' ? undefined : trimmed;
+    } else {
+      targetSchoolId = rawVal;
     }
-  }
 
-  const isSchoolChanging =
-    updates.schoolId !== undefined && updates.schoolId !== existingProfile.schoolId;
+    if (targetSchoolId !== undefined && targetSchoolId !== null) {
+      const schoolExists = state.schools.some((s) => s.id === targetSchoolId);
+      if (!schoolExists) {
+        throw new Error(`School with ID "${targetSchoolId}" not found`);
+      }
+    } else {
+      targetSchoolId = undefined;
+    }
 
-  if (isSchoolChanging) {
-    const hasYearPlan = state.yearPlans.some((yp) => yp.profileId === profileId);
-    const hasWorkspace = state.workspaces.some((ws) => ws.profileId === profileId);
+    const isSchoolChanging = targetSchoolId !== existingProfile.schoolId;
 
-    if (hasYearPlan || hasWorkspace) {
-      throw new Error(
-        `Cannot change schoolId for profile "${profileId}" because it already has YearPlans or Workspaces`
-      );
+    if (isSchoolChanging) {
+      const hasYearPlan = state.yearPlans.some((yp) => yp.profileId === profileId);
+      const hasWorkspace = state.workspaces.some((ws) => ws.profileId === profileId);
+
+      if (hasYearPlan || hasWorkspace) {
+        throw new Error(
+          `Cannot change schoolId for profile "${profileId}" because it already has YearPlans or Workspaces`
+        );
+      }
     }
   }
 
@@ -1604,6 +1657,7 @@ export function updateProfileV5(
   const updatedProfile: TeacherProfile = {
     ...existingProfile,
     ...updates,
+    schoolId: targetSchoolId,
     id: existingProfile.id,
     createdAt: existingProfile.createdAt,
     updatedAt: now,
@@ -1642,23 +1696,7 @@ export function deleteProfileV5(profileId: string): void {
 
 export function setActiveProfileV5(profileId: string): void {
   const state = loadStorageV5();
-
-  const profileExists = state.profiles.some((p) => p.id === profileId);
-  if (!profileExists) {
-    throw new Error(`Profile with ID "${profileId}" not found`);
-  }
-
-  state.activeProfileId = profileId;
-
-  if (state.activeYearPlanId) {
-    const activeYP = state.yearPlans.find((yp) => yp.id === state.activeYearPlanId);
-    if (!activeYP || activeYP.profileId !== profileId) {
-      state.activeYearPlanId = undefined;
-      state.activeWorkspaceId = undefined;
-      state.activeSemesterPlanId = undefined;
-    }
-  }
-
+  setActiveProfileInState(state, profileId);
   saveStorageV5(state);
 }
 
