@@ -31,7 +31,14 @@ export interface RuntimeContextV5 {
 
 /**
  * Resolves the V5 Runtime Context read model from canonical V5 storage state.
- * Performs exactly 1 V5 storage read (loadStorageV5) and 0 writes.
+ *
+ * Contract:
+ * - If the V5 storage key exists: Performs exactly 1 V5 storage read (loadStorageV5) and 0 writes.
+ * - If the V5 storage key is missing (first-run): Performs exactly 1 V5 storage read,
+ *   initializes the canonical empty V5 state (which performs exactly 1 V5 write), and returns
+ *   a valid empty RuntimeContextV5.
+ *
+ * Never reads or touches legacy V3 storage.
  */
 export function getRuntimeContextV5(): RuntimeContextV5 {
   const state = loadStorageV5();

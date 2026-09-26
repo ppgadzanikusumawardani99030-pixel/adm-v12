@@ -432,6 +432,28 @@ runTest('17. Legacy V3 storage key is completely untouched and unread', () => {
   );
 });
 
+// =========================================================================
+// TEST 18: First-run canonical behavior
+// =========================================================================
+runTest('18. First-run: Empty storage initializes canonical V5 state with exactly 1 read and 1 write', () => {
+  mockStorage.clear();
+  assert.strictEqual(mockStorage.getItem(STORAGE_KEY_V5), null);
+
+  mockStorage.resetCounts();
+  const ctx = getRuntimeContextV5();
+
+  assert.strictEqual(mockStorage.readCount, 1);
+  assert.strictEqual(mockStorage.writeCount, 1);
+
+  assert.strictEqual(ctx.curriculumRuntimeStatus, 'NO_YEAR_PLAN');
+  assert.strictEqual(ctx.activeProfile, undefined);
+  assert.strictEqual(ctx.activeYearPlan, undefined);
+  assert.strictEqual(ctx.activeWorkspace, undefined);
+  assert.strictEqual(ctx.activeSemesterPlan, undefined);
+  assert.strictEqual(ctx.annualData, undefined);
+  assert.strictEqual(ctx.semesterData, undefined);
+});
+
 console.log(`\n========================================`);
 console.log(`ALL V5 RUNTIME READ MODEL TESTS PASSED (${passedTests}/${totalTests})`);
 console.log(`========================================\n`);
