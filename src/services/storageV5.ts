@@ -212,6 +212,96 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
   const yearPlans = state.yearPlans as Array<Record<string, unknown>>;
   const semesterPlans = state.semesterPlans as Array<Record<string, unknown>>;
 
+  const checkNonEmptyString = (val: unknown, fieldName: string) => {
+    if (typeof val !== 'string' || !val.trim()) {
+      throw new Error(`Field "${fieldName}" must be a non-empty string`);
+    }
+  };
+
+  // Validate YearPlans shape (Rule 1)
+  for (const yp of yearPlans) {
+    checkNonEmptyString(yp.id, 'yearPlan.id');
+    checkNonEmptyString(yp.profileId, 'yearPlan.profileId');
+    checkNonEmptyString(yp.schoolId, 'yearPlan.schoolId');
+    checkNonEmptyString(yp.academicYear, 'yearPlan.academicYear');
+
+    if (yp.curriculumType !== 'KURIKULUM_MERDEKA' && yp.curriculumType !== 'K13') {
+      throw new Error(`yearPlan.curriculumType must be exactly "KURIKULUM_MERDEKA" or "K13"`);
+    }
+
+    if (yp.level !== 'SD' && yp.level !== 'SMP' && yp.level !== 'SMA' && yp.level !== 'SMK') {
+      throw new Error(`yearPlan.level must be exactly "SD", "SMP", "SMA", or "SMK"`);
+    }
+
+    checkNonEmptyString(yp.grade, 'yearPlan.grade');
+    checkNonEmptyString(yp.subject, 'yearPlan.subject');
+    checkNonEmptyString(yp.createdAt, 'yearPlan.createdAt');
+    checkNonEmptyString(yp.updatedAt, 'yearPlan.updatedAt');
+
+    // Reject legacy semester authority fields if present
+    if ('semester' in yp) {
+      throw new Error('YearPlan has forbidden legacy field "semester"');
+    }
+    if ('activeSemester' in yp) {
+      throw new Error('YearPlan has forbidden legacy field "activeSemester"');
+    }
+    if ('academicSettingId' in yp) {
+      throw new Error('YearPlan has forbidden legacy field "academicSettingId"');
+    }
+  }
+
+  // Validate Workspaces shape (Rule 2)
+  for (const ws of workspaces) {
+    checkNonEmptyString(ws.id, 'workspace.id');
+    checkNonEmptyString(ws.profileId, 'workspace.profileId');
+    checkNonEmptyString(ws.schoolId, 'workspace.schoolId');
+    checkNonEmptyString(ws.yearPlanId, 'workspace.yearPlanId');
+    checkNonEmptyString(ws.name, 'workspace.name');
+    checkNonEmptyString(ws.createdAt, 'workspace.createdAt');
+    checkNonEmptyString(ws.updatedAt, 'workspace.updatedAt');
+
+    // Reject legacy workspace fields if present
+    if ('academicSettingId' in ws) {
+      throw new Error('Workspace has forbidden legacy field "academicSettingId"');
+    }
+    if ('semester' in ws) {
+      throw new Error('Workspace has forbidden legacy field "semester"');
+    }
+    if ('activeSemester' in ws) {
+      throw new Error('Workspace has forbidden legacy field "activeSemester"');
+    }
+  }
+
+  // Validate SemesterPlans shape (Rule 3)
+  for (const sp of semesterPlans) {
+    checkNonEmptyString(sp.id, 'semesterPlan.id');
+    checkNonEmptyString(sp.yearPlanId, 'semesterPlan.yearPlanId');
+    checkNonEmptyString(sp.createdAt, 'semesterPlan.createdAt');
+    checkNonEmptyString(sp.updatedAt, 'semesterPlan.updatedAt');
+
+    const sem = sp.semester;
+    if (typeof sem !== 'number' || (sem !== 1 && sem !== 2)) {
+      throw new Error(`semesterPlan.semester must be exactly number 1 or 2, received ${typeof sem} "${String(sem)}"`);
+    }
+
+    // Reject duplicated parent authority fields in SemesterPlan
+    const forbiddenSemesterPlanFields = [
+      'profileId',
+      'schoolId',
+      'academicYear',
+      'grade',
+      'subject',
+      'curriculumType',
+      'activeSemester',
+      'academicSettingId'
+    ];
+    for (const f of forbiddenSemesterPlanFields) {
+      if (f in sp) {
+        throw new Error(`SemesterPlan contains duplicated parent authority field "${f}"`);
+      }
+    }
+  }
+
   // 1. Root ID uniqueness
   const checkIdUniqueness = (arr: Array<Record<string, unknown>>, name: string) => {
     const seen = new Set<string>();
@@ -363,12 +453,7 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
       );
     }
 
-    const sem = Number(sp.semester);
-    if (sem !== 1 && sem !== 2) {
-      throw new Error(
-        `SemesterPlan "${sp.id}" invalid semester value "${String(sp.semester)}": expected 1 or 2`
-      );
-    }
+    const sem = sp.semester as number;
 
     if (!yearPlanSemesterCounts.has(yearPlanId)) {
       yearPlanSemesterCounts.set(yearPlanId, { sem1: 0, sem2: 0 });
@@ -418,6 +503,11 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
         );
       }
       seenYearPlans.add(ypId);
+
+      const val = entry.value;
+      if (!val || typeof val !== 'object' || Array.isArray(val)) {
+        throw new Error(`Entry in "${collName}" value must exist and be a non-null object`);
+      }
     }
   };
 
@@ -472,17 +562,42 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
       }
       seenSemesterPlans.add(spId);
 
+      const val = entry.value;
+      if (val === undefined || val === null) {
+        throw new Error(`Entry in "${collName}" is missing a value`);
+      }
+
+      const arrayValuedCollections = [
+        'semesterData.timeAllocation',
+        'semesterData.learningPlan',
+        'semesterData.assessmentCriteria',
+        'semesterData.assessmentPlan',
+        'semesterData.assessmentPackage',
+        'semesterData.roster',
+        'semesterData.remedial',
+        'semesterData.enrichment'
+      ];
+
+      const objectValuedCollections = [
+        'semesterJPSettings',
+        'semesterData.academicCalendar',
+        'semesterData.attendance',
+        'semesterData.grade'
+      ];
+
+      if (arrayValuedCollections.includes(collName)) {
+        if (!Array.isArray(val)) {
+          throw new Error(`Collection "${collName}" value must be an array`);
+        }
+      } else if (objectValuedCollections.includes(collName)) {
+        if (typeof val !== 'object' || Array.isArray(val)) {
+          throw new Error(`Collection "${collName}" value must be a non-null object`);
+        }
+      }
+
       // Special check for semesterJPSettings inner semesterPlanId
       if (collName === 'semesterJPSettings') {
-        if (
-          !entry.value ||
-          typeof entry.value !== 'object' ||
-          Array.isArray(entry.value)
-        ) {
-          throw new Error(`Invalid value in "semesterJPSettings"`);
-        }
-
-        const innerId = (entry.value as Record<string, unknown>).semesterPlanId;
+        const innerId = (val as Record<string, unknown>).semesterPlanId;
 
         if (
           typeof innerId !== 'string' ||
@@ -547,6 +662,18 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
   );
 
   // 7. Active Context Pointer Validation
+  const checkActivePointer = (val: unknown, name: string) => {
+    if (val !== undefined && val !== null) {
+      if (typeof val !== 'string' || !val.trim()) {
+        throw new Error(`Active context pointer "${name}" must be a non-empty string`);
+      }
+    }
+  };
+  checkActivePointer(state.activeProfileId, 'activeProfileId');
+  checkActivePointer(state.activeYearPlanId, 'activeYearPlanId');
+  checkActivePointer(state.activeWorkspaceId, 'activeWorkspaceId');
+  checkActivePointer(state.activeSemesterPlanId, 'activeSemesterPlanId');
+
   if (state.activeProfileId !== undefined && state.activeProfileId !== null) {
     const actProf = String(state.activeProfileId);
     if (!profileMap.has(actProf)) {
@@ -694,6 +821,13 @@ export function parseBackupV5(jsonString: string): AppStorageStateV5 {
   if (typeof envelope.exportedAt !== 'string' || !envelope.exportedAt.trim()) {
     throw new Error(
       'Invalid backup format: "exportedAt" must be a valid non-empty ISO date string'
+    );
+  }
+
+  const parsedDate = Date.parse(envelope.exportedAt);
+  if (isNaN(parsedDate)) {
+    throw new Error(
+      'Invalid backup format: "exportedAt" must be a parseable valid date string'
     );
   }
 

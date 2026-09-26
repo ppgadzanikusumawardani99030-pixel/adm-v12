@@ -3,6 +3,7 @@ import {
   createInitialStorageV5,
   validateStorageStateV5,
   serializeBackupV5,
+  parseBackupV5,
 } from '../src/services/storageV5';
 import { AppStorageStateV5 } from '../src/types';
 
@@ -221,7 +222,7 @@ runTest('5. SemesterPlan Relations: Enforces 1 YearPlan ↔ exactly 1 Sem 1 & 1 
   // Invalid semester value
   const badSemVal = createValidTestState();
   (badSemVal.semesterPlans[0] as any).semester = 3;
-  assert.throws(() => validateStorageStateV5(badSemVal), /invalid semester value "3"/i);
+  assert.throws(() => validateStorageStateV5(badSemVal), /must be exactly number 1 or 2/i);
 
   // Missing Semester 1
   const noSem1 = createValidTestState();
@@ -436,6 +437,198 @@ runTest('9. serializeBackupV5 Gate: Throws on invalid state before producing JSO
   invalidState.semesterPlans = []; // break semester plan relation
 
   assert.throws(() => serializeBackupV5(invalidState), /must have exactly 1 SemesterPlan/i);
+});
+
+// =========================================================================
+// TEST 10: YearPlan shape strictness checks
+// =========================================================================
+runTest('10. YearPlan shape strictness checks', () => {
+  // curriculumType missing
+  const state1 = createValidTestState();
+  delete (state1.yearPlans[0] as any).curriculumType;
+  assert.throws(() => validateStorageStateV5(state1), /yearPlan.curriculumType must be exactly/i);
+
+  // curriculumType invalid
+  const state2 = createValidTestState();
+  (state2.yearPlans[0] as any).curriculumType = 'K2013';
+  assert.throws(() => validateStorageStateV5(state2), /yearPlan.curriculumType must be exactly/i);
+
+  // containing forbidden semester field
+  const state3 = createValidTestState();
+  (state3.yearPlans[0] as any).semester = 1;
+  assert.throws(() => validateStorageStateV5(state3), /forbidden legacy field "semester"/i);
+
+  // containing forbidden activeSemester field
+  const state4 = createValidTestState();
+  (state4.yearPlans[0] as any).activeSemester = 1;
+  assert.throws(() => validateStorageStateV5(state4), /forbidden legacy field "activeSemester"/i);
+
+  // containing forbidden academicSettingId field
+  const state5 = createValidTestState();
+  (state5.yearPlans[0] as any).academicSettingId = 'some-id';
+  assert.throws(() => validateStorageStateV5(state5), /forbidden legacy field "academicSettingId"/i);
+});
+
+// =========================================================================
+// TEST 11: Workspace shape strictness checks
+// =========================================================================
+runTest('11. Workspace shape strictness checks', () => {
+  // Workspace with academicSettingId
+  const state1 = createValidTestState();
+  (state1.workspaces[0] as any).academicSettingId = 'some-id';
+  assert.throws(() => validateStorageStateV5(state1), /forbidden legacy field "academicSettingId"/i);
+
+  // Workspace with semester
+  const state2 = createValidTestState();
+  (state2.workspaces[0] as any).semester = 1;
+  assert.throws(() => validateStorageStateV5(state2), /forbidden legacy field "semester"/i);
+
+  // Workspace missing yearPlanId
+  const state3 = createValidTestState();
+  delete (state3.workspaces[0] as any).yearPlanId;
+  assert.throws(() => validateStorageStateV5(state3), /Field "workspace.yearPlanId" must be a non-empty string/i);
+});
+
+// =========================================================================
+// TEST 12: SemesterPlan shape and duplication strictness checks
+// =========================================================================
+runTest('12. SemesterPlan shape and duplication strictness checks', () => {
+  // semester "1" string
+  const state1 = createValidTestState();
+  (state1.semesterPlans[0] as any).semester = "1";
+  assert.throws(() => validateStorageStateV5(state1), /semesterPlan.semester must be exactly number 1 or 2/i);
+
+  // semester "2" string
+  const state2 = createValidTestState();
+  (state2.semesterPlans[1] as any).semester = "2";
+  assert.throws(() => validateStorageStateV5(state2), /semesterPlan.semester must be exactly number 1 or 2/i);
+
+  // semester 3
+  const state3 = createValidTestState();
+  (state3.semesterPlans[0] as any).semester = 3;
+  assert.throws(() => validateStorageStateV5(state3), /semesterPlan.semester must be exactly number 1 or 2/i);
+
+  // containing duplicated academicYear
+  const state4 = createValidTestState();
+  (state4.semesterPlans[0] as any).academicYear = '2026/2027';
+  assert.throws(() => validateStorageStateV5(state4), /duplicated parent authority field "academicYear"/i);
+
+  // containing duplicated profileId
+  const state5 = createValidTestState();
+  (state5.semesterPlans[0] as any).profileId = 'prof-1';
+  assert.throws(() => validateStorageStateV5(state5), /duplicated parent authority field "profileId"/i);
+});
+
+// =========================================================================
+// TEST 13: Active pointer strict types and non-empty checks
+// =========================================================================
+runTest('13. Active pointer strict types and non-empty checks', () => {
+  // activeYearPlanId as non-string
+  const state1 = createValidTestState();
+  (state1 as any).activeYearPlanId = 123;
+  assert.throws(() => validateStorageStateV5(state1), /must be a non-empty string/i);
+
+  // activeWorkspaceId as empty string
+  const state2 = createValidTestState();
+  (state2 as any).activeWorkspaceId = "   ";
+  assert.throws(() => validateStorageStateV5(state2), /must be a non-empty string/i);
+
+  // activeSemesterPlanId as empty string
+  const state3 = createValidTestState();
+  (state3 as any).activeSemesterPlanId = "";
+  assert.throws(() => validateStorageStateV5(state3), /must be a non-empty string/i);
+});
+
+// =========================================================================
+// TEST 14: Scoped wrapper value shape checks
+// =========================================================================
+runTest('14. Scoped wrapper value shape checks', () => {
+  // YearScopedEntry without value
+  const state1 = createValidTestState();
+  state1.annualData.cp.push({ yearPlanId: 'yp-1', value: null as any });
+  assert.throws(() => validateStorageStateV5(state1), /value must exist and be a non-null object/i);
+
+  // SemesterScopedEntry without value
+  const state2 = createValidTestState();
+  state2.semesterData.academicCalendar.push({ semesterPlanId: 'sp-1', value: undefined as any });
+  assert.throws(() => validateStorageStateV5(state2), /is missing a value/i);
+
+  // assessmentPackage value non-array
+  const state3 = createValidTestState();
+  state3.semesterData.assessmentPackage.push({ semesterPlanId: 'sp-1', value: { notAnArray: true } as any });
+  assert.throws(() => validateStorageStateV5(state3), /value must be an array/i);
+});
+
+// =========================================================================
+// TEST 15: Complex valid AssessmentPackage survives save/load and serialize/parse roundtrip
+// =========================================================================
+runTest('15. Complex valid AssessmentPackage survives save/load and serialize/parse roundtrip', () => {
+  const state = createValidTestState();
+  const pkgValue = [
+    {
+      id: 'pkg-1',
+      name: 'Package 1',
+      blueprint: { title: 'BP 1' },
+      instrument: { questions: [] },
+      scoringGuide: { rubrics: [] }
+    }
+  ];
+  state.semesterData.assessmentPackage.push({
+    semesterPlanId: 'sp-1',
+    value: pkgValue as any
+  });
+
+  const validated = validateStorageStateV5(state);
+  assert.deepStrictEqual(validated.semesterData.assessmentPackage[0].value, pkgValue);
+
+  const serialized = serializeBackupV5(state);
+  const parsed = parseBackupV5(serialized);
+  assert.deepStrictEqual(parsed.semesterData.assessmentPackage[0].value, pkgValue);
+});
+
+// =========================================================================
+// TEST 16: Mismatched legacy inner academicSettingId remains preserved and does NOT become SSOT
+// =========================================================================
+runTest('16. Mismatched legacy inner academicSettingId remains preserved without becoming SSOT', () => {
+  const state = createValidTestState();
+  const innerValue = {
+    academicSettingId: 'mismatched-inner-id', // different from outer semesterPlanId 'sp-1'
+    someOtherData: 'hello'
+  };
+  state.semesterData.academicCalendar.push({
+    semesterPlanId: 'sp-1',
+    value: innerValue as any
+  });
+
+  const validated = validateStorageStateV5(state);
+  assert.deepStrictEqual(validated.semesterData.academicCalendar[0].value, innerValue);
+});
+
+// =========================================================================
+// TEST 17: parseBackupV5 validates exportedAt string and parseability
+// =========================================================================
+runTest('17. parseBackupV5 validates exportedAt string and parseability', () => {
+  const validState = createValidTestState();
+  const validBackup = {
+    app: 'Administrasi Guru AI',
+    schemaVersion: 5,
+    exportedAt: '2026-09-26T00:00:00.000Z',
+    data: validState
+  };
+
+  assert.doesNotThrow(() => parseBackupV5(JSON.stringify(validBackup)));
+
+  const invalidBackup1 = {
+    ...validBackup,
+    exportedAt: ''
+  };
+  assert.throws(() => parseBackupV5(JSON.stringify(invalidBackup1)), /must be a valid non-empty ISO date string/i);
+
+  const invalidBackup2 = {
+    ...validBackup,
+    exportedAt: 'not-a-date'
+  };
+  assert.throws(() => parseBackupV5(JSON.stringify(invalidBackup2)), /must be a parseable valid date string/i);
 });
 
 console.log(`\n========================================`);
