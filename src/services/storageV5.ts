@@ -436,11 +436,24 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
       seenSemesterPlans.add(spId);
 
       // Special check for semesterJPSettings inner semesterPlanId
-      if (collName === 'semesterJPSettings' && entry.value && typeof entry.value === 'object') {
-        const valObj = entry.value as Record<string, unknown>;
-        if (valObj.semesterPlanId && valObj.semesterPlanId !== spId) {
+      if (collName === 'semesterJPSettings') {
+        if (
+          !entry.value ||
+          typeof entry.value !== 'object' ||
+          Array.isArray(entry.value)
+        ) {
+          throw new Error(`Invalid value in "semesterJPSettings"`);
+        }
+
+        const innerId = (entry.value as Record<string, unknown>).semesterPlanId;
+
+        if (
+          typeof innerId !== 'string' ||
+          !innerId.trim() ||
+          innerId !== spId
+        ) {
           throw new Error(
-            `semesterJPSettings inner semesterPlanId "${valObj.semesterPlanId}" does not match outer semesterPlanId "${spId}"`
+            `semesterJPSettings inner semesterPlanId "${innerId}" does not match outer semesterPlanId "${spId}"`
           );
         }
       }
