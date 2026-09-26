@@ -1903,4 +1903,109 @@ export function deletePrincipalHistoryV5(historyId: string): void {
   saveStorageV5(state);
 }
 
+// ============================================================================
+// HIERARCHY DELETE API
+// ============================================================================
+
+/**
+ * Internal helper to atomically perform canonical YearPlan hierarchy deletion in-memory.
+ */
+function performDeleteYearHierarchyInState(
+  state: AppStorageStateV5,
+  yearPlanId: string
+): void {
+  const yearPlan = state.yearPlans.find((yp) => yp.id === yearPlanId);
+  if (!yearPlan) {
+    throw new Error(`YearPlan with ID "${yearPlanId}" not found`);
+  }
+
+  const parentWorkspaces = state.workspaces.filter((ws) => ws.yearPlanId === yearPlanId);
+  if (parentWorkspaces.length !== 1) {
+    throw new Error(
+      `YearPlan with ID "${yearPlanId}" must have exactly 1 parent Workspace (found ${parentWorkspaces.length})`
+    );
+  }
+
+  const semesterPlans = state.semesterPlans.filter((sp) => sp.yearPlanId === yearPlanId);
+  const sem1 = semesterPlans.find((sp) => Number(sp.semester) === 1);
+  const sem2 = semesterPlans.find((sp) => Number(sp.semester) === 2);
+  if (!sem1 || !sem2 || semesterPlans.length !== 2) {
+    throw new Error(
+      `YearPlan with ID "${yearPlanId}" must have exactly 1 SemesterPlan for Semester 1 and 1 for Semester 2`
+    );
+  }
+
+  const targetYearPlanId = yearPlan.id;
+  const targetWorkspace = parentWorkspaces[0];
+  const targetWorkspaceId = targetWorkspace.id;
+  const targetSemesterPlanIds = new Set(semesterPlans.map((sp) => sp.id));
+
+  // 1. Root hierarchy removal
+  state.yearPlans = state.yearPlans.filter((yp) => yp.id !== targetYearPlanId);
+  state.workspaces = state.workspaces.filter((ws) => ws.id !== targetWorkspaceId);
+  state.semesterPlans = state.semesterPlans.filter((sp) => !targetSemesterPlanIds.has(sp.id));
+
+  // 2. Annual cascade removal (authority: entry.yearPlanId)
+  state.annualJPReferences = state.annualJPReferences.filter((e) => e.yearPlanId !== targetYearPlanId);
+  state.annualData.cp = state.annualData.cp.filter((e) => e.yearPlanId !== targetYearPlanId);
+  state.annualData.cpAnalysis = state.annualData.cpAnalysis.filter((e) => e.yearPlanId !== targetYearPlanId);
+  state.annualData.tp = state.annualData.tp.filter((e) => e.yearPlanId !== targetYearPlanId);
+  state.annualData.atp = state.annualData.atp.filter((e) => e.yearPlanId !== targetYearPlanId);
+  state.annualData.curriculumContext = state.annualData.curriculumContext.filter((e) => e.yearPlanId !== targetYearPlanId);
+
+  // 3. Semester cascade removal (authority: entry.semesterPlanId)
+  state.semesterJPSettings = state.semesterJPSettings.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.academicCalendar = state.semesterData.academicCalendar.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.timeAllocation = state.semesterData.timeAllocation.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.learningPlan = state.semesterData.learningPlan.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.assessmentCriteria = state.semesterData.assessmentCriteria.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.assessmentPlan = state.semesterData.assessmentPlan.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.assessmentPackage = state.semesterData.assessmentPackage.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.roster = state.semesterData.roster.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.attendance = state.semesterData.attendance.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.grade = state.semesterData.grade.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.remedial = state.semesterData.remedial.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+  state.semesterData.enrichment = state.semesterData.enrichment.filter((e) => !targetSemesterPlanIds.has(e.semesterPlanId));
+
+  // 4. Documents cascade removal (authority: document.workspaceId)
+  if (Array.isArray(state.documents)) {
+    state.documents = state.documents.filter((doc) => doc.workspaceId !== targetWorkspaceId);
+  }
+
+  // 5. Active context pointer cleanup
+  if (state.activeYearPlanId === targetYearPlanId) {
+    state.activeYearPlanId = undefined;
+    state.activeWorkspaceId = undefined;
+    state.activeSemesterPlanId = undefined;
+  }
+
+  if (state.activeWorkspaceId === targetWorkspaceId) {
+    state.activeWorkspaceId = undefined;
+    if (state.activeYearPlanId === targetYearPlanId) {
+      state.activeYearPlanId = undefined;
+      state.activeSemesterPlanId = undefined;
+    }
+  }
+
+  if (state.activeSemesterPlanId !== undefined && targetSemesterPlanIds.has(state.activeSemesterPlanId)) {
+    state.activeSemesterPlanId = undefined;
+  }
+}
+
+export function deleteYearHierarchyV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  performDeleteYearHierarchyInState(state, yearPlanId);
+  saveStorageV5(state);
+}
+
+export function deleteWorkspaceV5(workspaceId: string): void {
+  const state = loadStorageV5();
+  const ws = state.workspaces.find((w) => w.id === workspaceId);
+  if (!ws) {
+    throw new Error(`Workspace with ID "${workspaceId}" not found`);
+  }
+  performDeleteYearHierarchyInState(state, ws.yearPlanId);
+  saveStorageV5(state);
+}
+
 

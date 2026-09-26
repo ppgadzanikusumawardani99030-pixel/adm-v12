@@ -31,6 +31,9 @@ jobs:
       - name: Test Storage V5 Hierarchy CRUD
         run: npx tsx scripts/testStorageV5HierarchyCrud.ts
 
+      - name: Test Storage V5 Hierarchy Delete
+        run: npx tsx scripts/testStorageV5HierarchyDelete.ts
+
       - name: Test Storage V5 Annual CRUD
         run: npx tsx scripts/testStorageV5AnnualCrud.ts
 
