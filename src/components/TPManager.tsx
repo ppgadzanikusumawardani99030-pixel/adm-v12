@@ -40,6 +40,10 @@ import {
   buildTPDiagnosticReport,
   recordDiagnosticEvent,
 } from '../services/diagnosticService';
+import {
+  runPreviewRouteProbe,
+  formatPreviewRouteProbeReport,
+} from '../services/previewRouteProbe';
 
 interface TPManagerProps {
   tp: TPData;
@@ -442,7 +446,7 @@ export const TPManager: React.FC<TPManagerProps> = ({
   };
 
   const handleCopyDiagnostic = async () => {
-    const report = buildTPDiagnosticReport({
+    let report = buildTPDiagnosticReport({
       module: 'TP',
       workspaceId: tp.workspaceId,
       academicSetting,
@@ -453,6 +457,15 @@ export const TPManager: React.FC<TPManagerProps> = ({
       learningPlanGate: validation.isSiap ? 'ALLOWED' : 'BLOCKED',
       learningPlanGateReason: validation.isSiap ? undefined : validation.issues[0],
     });
+
+    try {
+      const probeResult = await runPreviewRouteProbe();
+      const probeText = formatPreviewRouteProbeReport(probeResult);
+      report += probeText;
+    } catch (err: any) {
+      report += `\n\n=== GAS Preview Route Probe ===\nFAILED: ${err?.message || String(err)}\n`;
+    }
+
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(report);

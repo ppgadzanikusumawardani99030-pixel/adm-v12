@@ -64,6 +64,9 @@ jobs:
       - name: Test Development Server Runtime
         run: npx tsx scripts/testDevelopmentServerSmoke.ts
 
+      - name: Test Preview Route Probe
+        run: npx tsx scripts/testPreviewRouteProbe.ts
+
       - name: Run Linter
         run: npm run lint
 
