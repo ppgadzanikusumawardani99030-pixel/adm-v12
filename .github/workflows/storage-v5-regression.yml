@@ -31,6 +31,9 @@ jobs:
       - name: Test Storage V5 Annual CRUD
         run: npx tsx scripts/testStorageV5AnnualCrud.ts
 
+      - name: Test Storage V5 Semester CRUD
+        run: npx tsx scripts/testStorageV5SemesterCrud.ts
+
       - name: Test Storage V5 Persistence
         run: npx tsx scripts/testStorageV5Persistence.ts
 

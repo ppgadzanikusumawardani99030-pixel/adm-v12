@@ -4,6 +4,10 @@ import {
   STORAGE_KEY_V5,
   AdministrationWorkspaceV5,
   YearScopedEntry,
+  SemesterScopedEntry,
+  SemesterCalendarEntry,
+  SemesterAttendanceEntry,
+  SemesterGradeEntry,
 } from '../types/storageV5';
 import {
   YearPlan,
@@ -15,6 +19,15 @@ import {
   ATPData,
   CurriculumContextLock,
   AnnualJPReference,
+  SemesterJPSetting,
+  TimeAllocation,
+  LearningPlan,
+  AssessmentCriterion,
+  AssessmentPlan,
+  AssessmentPackage,
+  Student,
+  RemedialRecord,
+  EnrichmentRecord,
 } from '../types';
 
 export { STORAGE_KEY_V5 };
@@ -27,6 +40,23 @@ export interface AnnualDataV5Result {
   atp: ATPData | undefined;
   curriculumContext: CurriculumContextLock | undefined;
   annualJPReference: AnnualJPReference | undefined;
+}
+
+export interface SemesterDataV5Result {
+  semesterPlan: SemesterPlan;
+  yearPlan: YearPlan;
+  semesterJPSetting: SemesterJPSetting | undefined;
+  academicCalendar: SemesterCalendarEntry | undefined;
+  timeAllocation: TimeAllocation[] | undefined;
+  learningPlan: LearningPlan[] | undefined;
+  assessmentCriteria: AssessmentCriterion[] | undefined;
+  assessmentPlan: AssessmentPlan[] | undefined;
+  assessmentPackage: AssessmentPackage[] | undefined;
+  roster: Student[] | undefined;
+  attendance: SemesterAttendanceEntry | undefined;
+  grade: SemesterGradeEntry | undefined;
+  remedial: RemedialRecord[] | undefined;
+  enrichment: EnrichmentRecord[] | undefined;
 }
 
 export interface CreateYearHierarchyV5Params {
@@ -719,4 +749,373 @@ export function deleteAnnualJPReferenceV5(yearPlanId: string): void {
     saveStorageV5(state);
   }
 }
+
+/**
+ * Asserts that a SemesterPlan exists and its parent YearPlan exists.
+ * Returns both entities.
+ */
+function assertSemesterPlanAndParentExist(
+  state: AppStorageStateV5,
+  semesterPlanId: string
+): { semesterPlan: SemesterPlan; yearPlan: YearPlan } {
+  const semesterPlan = state.semesterPlans.find((sp) => sp.id === semesterPlanId);
+  if (!semesterPlan) {
+    throw new Error(`SemesterPlan with ID "${semesterPlanId}" not found`);
+  }
+
+  const yearPlan = state.yearPlans.find((yp) => yp.id === semesterPlan.yearPlanId);
+  if (!yearPlan) {
+    throw new Error(
+      `Parent YearPlan "${semesterPlan.yearPlanId}" not found for SemesterPlan "${semesterPlanId}"`
+    );
+  }
+
+  return { semesterPlan, yearPlan };
+}
+
+/**
+ * Upserts a SemesterScopedEntry into a semester collection.
+ * Replaces value if entry already exists, or inserts a new entry if not.
+ * Ensures exactly 1 wrapper per semesterPlanId.
+ */
+function upsertSemesterScopedEntry<T>(
+  collection: SemesterScopedEntry<T>[],
+  semesterPlanId: string,
+  value: T
+): T {
+  const existing = collection.find((entry) => entry.semesterPlanId === semesterPlanId);
+  if (existing) {
+    existing.value = value;
+  } else {
+    collection.push({ semesterPlanId, value });
+  }
+  return value;
+}
+
+/**
+ * Removes a SemesterScopedEntry from a semester collection.
+ * Returns true if an entry was removed, false if not found.
+ */
+function deleteSemesterScopedEntry<T>(
+  collection: SemesterScopedEntry<T>[],
+  semesterPlanId: string
+): boolean {
+  const index = collection.findIndex((entry) => entry.semesterPlanId === semesterPlanId);
+  if (index !== -1) {
+    collection.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Retrieves all semester-scoped domain data for a given SemesterPlan.
+ *
+ * Rules:
+ * - Validates that SemesterPlan and its parent YearPlan exist (throws if either not found)
+ * - Returns { semesterPlan, yearPlan, ...collections }
+ * - Unpopulated collections return undefined
+ * - Does not use activeSemesterPlanId implicitly
+ */
+export function getSemesterDataV5(semesterPlanId: string): SemesterDataV5Result {
+  const state = loadStorageV5();
+  const { semesterPlan, yearPlan } = assertSemesterPlanAndParentExist(state, semesterPlanId);
+
+  const semesterJPSetting = state.semesterJPSettings.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const academicCalendar = state.semesterData.academicCalendar.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const timeAllocation = state.semesterData.timeAllocation.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const learningPlan = state.semesterData.learningPlan.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const assessmentCriteria = state.semesterData.assessmentCriteria.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const assessmentPlan = state.semesterData.assessmentPlan.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const assessmentPackage = state.semesterData.assessmentPackage.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const roster = state.semesterData.roster.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const attendance = state.semesterData.attendance.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const grade = state.semesterData.grade.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const remedial = state.semesterData.remedial.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+  const enrichment = state.semesterData.enrichment.find(
+    (e) => e.semesterPlanId === semesterPlanId
+  )?.value;
+
+  return {
+    semesterPlan,
+    yearPlan,
+    semesterJPSetting,
+    academicCalendar,
+    timeAllocation,
+    learningPlan,
+    assessmentCriteria,
+    assessmentPlan,
+    assessmentPackage,
+    roster,
+    attendance,
+    grade,
+    remedial,
+    enrichment,
+  };
+}
+
+export function saveSemesterJPSettingV5(
+  semesterPlanId: string,
+  value: SemesterJPSetting
+): SemesterJPSetting {
+  if (value.semesterPlanId !== semesterPlanId) {
+    throw new Error(
+      `SemesterJPSetting inner semesterPlanId "${value.semesterPlanId}" does not match outer semesterPlanId "${semesterPlanId}"`
+    );
+  }
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterJPSettings, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAcademicCalendarV5(
+  semesterPlanId: string,
+  value: SemesterCalendarEntry
+): SemesterCalendarEntry {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.academicCalendar, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveTimeAllocationV5(
+  semesterPlanId: string,
+  value: TimeAllocation[]
+): TimeAllocation[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.timeAllocation, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveLearningPlansV5(
+  semesterPlanId: string,
+  value: LearningPlan[]
+): LearningPlan[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.learningPlan, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAssessmentCriteriaV5(
+  semesterPlanId: string,
+  value: AssessmentCriterion[]
+): AssessmentCriterion[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.assessmentCriteria, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAssessmentPlansV5(
+  semesterPlanId: string,
+  value: AssessmentPlan[]
+): AssessmentPlan[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.assessmentPlan, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAssessmentPackagesV5(
+  semesterPlanId: string,
+  value: AssessmentPackage[]
+): AssessmentPackage[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.assessmentPackage, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveRosterV5(semesterPlanId: string, value: Student[]): Student[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.roster, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAttendanceV5(
+  semesterPlanId: string,
+  value: SemesterAttendanceEntry
+): SemesterAttendanceEntry {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.attendance, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveGradeV5(
+  semesterPlanId: string,
+  value: SemesterGradeEntry
+): SemesterGradeEntry {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.grade, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveRemedialV5(
+  semesterPlanId: string,
+  value: RemedialRecord[]
+): RemedialRecord[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.remedial, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveEnrichmentV5(
+  semesterPlanId: string,
+  value: EnrichmentRecord[]
+): EnrichmentRecord[] {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  upsertSemesterScopedEntry(state.semesterData.enrichment, semesterPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function deleteSemesterJPSettingV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterJPSettings, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAcademicCalendarV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.academicCalendar, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteTimeAllocationV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.timeAllocation, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteLearningPlansV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.learningPlan, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAssessmentCriteriaV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.assessmentCriteria, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAssessmentPlansV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.assessmentPlan, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAssessmentPackagesV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.assessmentPackage, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteRosterV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.roster, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAttendanceV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.attendance, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteGradeV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.grade, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteRemedialV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.remedial, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteEnrichmentV5(semesterPlanId: string): void {
+  const state = loadStorageV5();
+  assertSemesterPlanAndParentExist(state, semesterPlanId);
+  const changed = deleteSemesterScopedEntry(state.semesterData.enrichment, semesterPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
 
