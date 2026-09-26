@@ -529,7 +529,7 @@ function validateAITPPayload(data: any): { isValid: boolean; reason?: string } {
 
 // 2. Endpoint: AI Generate TP from CP
 app.post('/api/ai/generate-tp', async (req, res) => {
-  const { cpGeneral, cpElements, cpAnalysis, subject, grade, phase, curriculum, count = 4 } = req.body || {};
+  const { cpGeneral, cpElements, cpAnalysisItems, subject, grade, phase, curriculum, count = 4 } = req.body || {};
 
   if (!cpGeneral && (!cpElements || cpElements.length === 0)) {
     return res.status(400).json({ error: 'Capaian Pembelajaran (CP) harus diisi terlebih dahulu' });
@@ -561,9 +561,9 @@ ${
     : 'Tidak ada rincian elemen.'
 }
 ${
-  cpAnalysis && Array.isArray(cpAnalysis) && cpAnalysis.length > 0
+  cpAnalysisItems && Array.isArray(cpAnalysisItems) && cpAnalysisItems.length > 0
     ? `\nANALISIS CP (Rujukan Kompetensi & Materi):
-${cpAnalysis.map((a: any, idx: number) => `${idx + 1}. [Elemen: ${a.elementName || '-'}] Kompetensi: ${a.cpCompetence || '-'} | Materi: ${a.materialScope || '-'} | Rekomendasi TP: ${a.suggestedTp || '-'}`).join('\n')}`
+${cpAnalysisItems.map((a: any, idx: number) => `${idx + 1}. [Elemen: ${a.elementName || '-'}] Kompetensi: ${a.cpCompetence || '-'} | Materi: ${a.materialScope || '-'} | Rekomendasi TP: ${a.suggestedTp || '-'}`).join('\n')}`
     : ''
 }
 

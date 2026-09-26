@@ -18,7 +18,6 @@ export interface CPAnalysisResult {
 export interface GenerateTPParams {
   cpGeneral: string;
   cpElements: CPElem[];
-  cpAnalysis?: any[];
   cpAnalysisItems?: any[];
   subject: string;
   grade: string;
@@ -104,13 +103,36 @@ export async function generateTPWithAI(params: GenerateTPParams): Promise<TPItem
       body: JSON.stringify(params),
     });
 
+    const contentType = res.headers.get('Content-Type') || '';
+    if (!contentType.includes('application/json')) {
+      const mime = contentType.split(';')[0]?.trim() || contentType || 'unknown';
+      throw new Error(`Endpoint AI TP tidak mengembalikan JSON (received ${mime}). Pastikan aplikasi dijalankan melalui backend Express/API, bukan static/Vite preview. (Status ${res.status})`);
+    }
+
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || `Gagal menghasilkan TP dengan AI (Status ${res.status})`);
     }
 
     const data = await res.json();
-    const rawItems = data.items || [];
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Respons AI TP tidak valid: format data harus berupa objek.');
+    }
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new Error('Respons AI TP tidak valid: "items" harus berupa array dan tidak boleh kosong.');
+    }
+    for (let i = 0; i < data.items.length; i++) {
+      const item = data.items[i];
+      if (!item || typeof item !== 'object') {
+        throw new Error(`Respons AI TP tidak valid: butir ke-${i + 1} bukan objek.`);
+      }
+      const stmt = item.statement || item.description;
+      if (!stmt || typeof stmt !== 'string' || stmt.trim() === '') {
+        throw new Error(`Respons AI TP tidak valid: butir ke-${i + 1} tidak memiliki statement/description yang sah.`);
+      }
+    }
+
+    const rawItems = data.items;
     return rawItems.map((item: any, idx: number) => {
       const stmt = item.statement || item.description || '';
       return {
