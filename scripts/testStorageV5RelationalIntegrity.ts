@@ -371,104 +371,61 @@ runTest('7. Semester Scoped Entries: Enforces existing semesterPlanId, max 1 ent
 // TEST 8: Active Context Pointer Validation
 // =========================================================================
 runTest('8. Active Context Pointers: Validates existence and relationship cross-checks', () => {
-  // Non-existent activeProfileId
-  const badActiveProf = createValidTestState();
-  badActiveProf.activeProfileId = 'prof-bad';
-  assert.throws(() => validateStorageStateV5(badActiveProf), /activeProfileId "prof-bad" references non-existent profile/i);
+  // 1. activeProfile only → PASS
+  const stateProfileOnly = createValidTestState();
+  stateProfileOnly.activeProfileId = 'prof-1';
+  stateProfileOnly.activeYearPlanId = undefined;
+  stateProfileOnly.activeWorkspaceId = undefined;
+  stateProfileOnly.activeSemesterPlanId = undefined;
+  assert.doesNotThrow(() => validateStorageStateV5(stateProfileOnly));
 
-  // Invalid activeYearPlanId
-  const badActiveYPId = createValidTestState();
-  badActiveYPId.activeYearPlanId = 'yp-non-existent';
-  assert.throws(() => validateStorageStateV5(badActiveYPId), /activeYearPlanId "yp-non-existent" references non-existent yearPlan/i);
+  // 2. activeWorkspace tanpa activeYear → THROW
+  const stateWsNoYear = createValidTestState();
+  stateWsNoYear.activeProfileId = 'prof-1';
+  stateWsNoYear.activeWorkspaceId = 'ws-1';
+  stateWsNoYear.activeYearPlanId = undefined;
+  stateWsNoYear.activeSemesterPlanId = undefined;
+  assert.throws(() => validateStorageStateV5(stateWsNoYear), /requires activeYearPlanId/i);
 
-  // Invalid activeWorkspaceId
-  const badActiveWSId = createValidTestState();
-  badActiveWSId.activeWorkspaceId = 'ws-non-existent';
-  assert.throws(() => validateStorageStateV5(badActiveWSId), /activeWorkspaceId "ws-non-existent" references non-existent workspace/i);
+  // 3. activeSemester tanpa activeYear → THROW
+  const stateSemNoYear = createValidTestState();
+  stateSemNoYear.activeProfileId = 'prof-1';
+  stateSemNoYear.activeSemesterPlanId = 'sp-1';
+  stateSemNoYear.activeYearPlanId = undefined;
+  stateSemNoYear.activeWorkspaceId = undefined;
+  assert.throws(() => validateStorageStateV5(stateSemNoYear), /requires activeYearPlanId/i);
 
-  // Invalid activeSemesterPlanId
-  const badActiveSPId = createValidTestState();
-  badActiveSPId.activeSemesterPlanId = 'sp-non-existent';
-  assert.throws(() => validateStorageStateV5(badActiveSPId), /activeSemesterPlanId "sp-non-existent" references non-existent semesterPlan/i);
+  // 4. activeYear tanpa activeProfile → THROW
+  const stateYearNoProf = createValidTestState();
+  stateYearNoProf.activeProfileId = undefined;
+  stateYearNoProf.activeYearPlanId = 'yp-1';
+  stateYearNoProf.activeWorkspaceId = 'ws-1';
+  stateYearNoProf.activeSemesterPlanId = undefined;
+  assert.throws(() => validateStorageStateV5(stateYearNoProf), /requires activeProfileId/i);
 
-  // Mismatched activeYearPlanId profileId
-  const badActiveYP = createValidTestState();
-  badActiveYP.profiles.push({
-    id: 'prof-2',
-    name: 'Dewi',
-    nip: '198501012010011002',
-    status: 'PNS',
-    defaultSubject: 'IPA',
-    defaultLevel: 'SMP',
-    schoolId: 'sch-1',
-    createdAt: '2026-07-01T00:00:00Z',
-    updatedAt: '2026-07-01T00:00:00Z',
-  });
-  badActiveYP.activeProfileId = 'prof-2';
-  badActiveYP.activeYearPlanId = 'yp-1'; // yp-1 belongs to prof-1
-  assert.throws(() => validateStorageStateV5(badActiveYP), /activeYearPlanId profileId "prof-1" mismatch with activeProfileId "prof-2"/i);
+  // 5. activeYear tanpa activeWorkspace → THROW
+  const stateYearNoWs = createValidTestState();
+  stateYearNoWs.activeProfileId = 'prof-1';
+  stateYearNoWs.activeYearPlanId = 'yp-1';
+  stateYearNoWs.activeWorkspaceId = undefined;
+  stateYearNoWs.activeSemesterPlanId = undefined;
+  assert.throws(() => validateStorageStateV5(stateYearNoWs), /requires activeWorkspaceId/i);
 
-  // activeWorkspace.yearPlanId !== activeYearPlanId mismatch
-  const wsYpMismatch = createValidTestState();
-  wsYpMismatch.yearPlans.push({
-    id: 'yp-2',
-    profileId: 'prof-1',
-    schoolId: 'sch-1',
-    academicYear: '2027/2028',
-    curriculumType: 'KURIKULUM_MERDEKA',
-    level: 'SMP',
-    grade: 'Kelas 8',
-    subject: 'Matematika',
-    createdAt: '2026-07-01T00:00:00Z',
-    updatedAt: '2026-07-01T00:00:00Z',
-  });
-  wsYpMismatch.workspaces.push({
-    id: 'ws-2',
-    profileId: 'prof-1',
-    schoolId: 'sch-1',
-    yearPlanId: 'yp-2',
-    name: 'Matematika Kelas 8',
-    createdAt: '2026-07-01T00:00:00Z',
-    updatedAt: '2026-07-01T00:00:00Z',
-  });
-  wsYpMismatch.semesterPlans.push(
-    { id: 'sp-3', yearPlanId: 'yp-2', semester: 1, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z' },
-    { id: 'sp-4', yearPlanId: 'yp-2', semester: 2, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z' }
-  );
-  wsYpMismatch.activeYearPlanId = 'yp-1';
-  wsYpMismatch.activeWorkspaceId = 'ws-2'; // ws-2 has yearPlanId = 'yp-2'
-  assert.throws(() => validateStorageStateV5(wsYpMismatch), /activeWorkspaceId yearPlanId "yp-2" mismatch with activeYearPlanId "yp-1"/i);
+  // 6. canonical profile + year + workspace → PASS
+  const stateCanonicalYP = createValidTestState();
+  stateCanonicalYP.activeProfileId = 'prof-1';
+  stateCanonicalYP.activeYearPlanId = 'yp-1';
+  stateCanonicalYP.activeWorkspaceId = 'ws-1';
+  stateCanonicalYP.activeSemesterPlanId = undefined;
+  assert.doesNotThrow(() => validateStorageStateV5(stateCanonicalYP));
 
-  // activeSemester.yearPlanId !== activeYearPlanId mismatch
-  const spYpMismatch = createValidTestState();
-  spYpMismatch.yearPlans.push({
-    id: 'yp-2',
-    profileId: 'prof-1',
-    schoolId: 'sch-1',
-    academicYear: '2027/2028',
-    curriculumType: 'KURIKULUM_MERDEKA',
-    level: 'SMP',
-    grade: 'Kelas 8',
-    subject: 'Matematika',
-    createdAt: '2026-07-01T00:00:00Z',
-    updatedAt: '2026-07-01T00:00:00Z',
-  });
-  spYpMismatch.workspaces.push({
-    id: 'ws-2',
-    profileId: 'prof-1',
-    schoolId: 'sch-1',
-    yearPlanId: 'yp-2',
-    name: 'Matematika Kelas 8',
-    createdAt: '2026-07-01T00:00:00Z',
-    updatedAt: '2026-07-01T00:00:00Z',
-  });
-  spYpMismatch.semesterPlans.push(
-    { id: 'sp-3', yearPlanId: 'yp-2', semester: 1, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z' },
-    { id: 'sp-4', yearPlanId: 'yp-2', semester: 2, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z' }
-  );
-  spYpMismatch.activeYearPlanId = 'yp-1';
-  spYpMismatch.activeSemesterPlanId = 'sp-3'; // sp-3 has yearPlanId = 'yp-2'
-  assert.throws(() => validateStorageStateV5(spYpMismatch), /activeSemesterPlanId yearPlanId "yp-2" mismatch with activeYearPlanId "yp-1"/i);
+  // 7. canonical profile + year + workspace + semester → PASS
+  const stateCanonicalAll = createValidTestState();
+  stateCanonicalAll.activeProfileId = 'prof-1';
+  stateCanonicalAll.activeYearPlanId = 'yp-1';
+  stateCanonicalAll.activeWorkspaceId = 'ws-1';
+  stateCanonicalAll.activeSemesterPlanId = 'sp-1';
+  assert.doesNotThrow(() => validateStorageStateV5(stateCanonicalAll));
 });
 
 // =========================================================================

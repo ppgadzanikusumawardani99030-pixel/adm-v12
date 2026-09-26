@@ -1164,9 +1164,9 @@ runTest('29. FIX 2C: empty schoolId normalized to undefined: Normalizes empty st
 });
 
 // =========================================================================
-// TEST 30: FIX 3D — setActiveProfile stale pointers
+// TEST 30: FIX 3D — setActiveProfile stale pointers updated (now invalid)
 // =========================================================================
-runTest('30. FIX 3D: setActiveProfile stale pointers: Safely clears stale pointers when activeYearPlanId is undefined', () => {
+runTest('30. FIX 3D: setActiveProfile stale pointers: Crafting activeWorkspaceId without activeYearPlanId is now rejected', () => {
   resetStorageV5();
   const sch = createSchoolV5({
     name: 'SDN 01 Menteng',
@@ -1199,31 +1199,140 @@ runTest('30. FIX 3D: setActiveProfile stale pointers: Safely clears stale pointe
     subject: 'Matematika',
   });
 
-  const profB = createProfileV5({
-    name: 'Teacher B',
-    nip: '1002',
-    status: 'PNS',
-    defaultSubject: 'IPA',
-    defaultLevel: 'SD',
-    schoolId: sch.id,
-  });
-
-  // Directly craft state: activeYearPlanId = undefined, activeWorkspaceId = workspace A
+  // Directly craft state: activeYearPlanId = undefined, activeWorkspaceId = workspace A (which is invalid!)
   const state = loadStorageV5();
   state.activeProfileId = profA.id;
   state.activeYearPlanId = undefined;
   state.activeWorkspaceId = resA.workspace.id;
   state.activeSemesterPlanId = undefined;
-  saveStorageV5(state);
 
-  // Switch active profile to Profile B
-  setActiveProfileV5(profB.id);
+  assert.throws(() => {
+    saveStorageV5(state);
+  }, /requires activeYearPlanId/i);
+});
 
+// =========================================================================
+// TEST 31: PrincipalHistory ↔ School Synchronization Lifecycle
+// =========================================================================
+runTest('31. PrincipalHistory ↔ School synchronization lifecycle', () => {
+  resetStorageV5();
+
+  const schoolA = createSchoolV5({
+    name: 'School A',
+    npsn: '11111111',
+    address: 'Jl. A',
+    village: 'V A',
+    district: 'D A',
+    regency: 'R A',
+    province: 'P A',
+    principalName: '',
+    principalNip: '',
+  });
+
+  const schoolB = createSchoolV5({
+    name: 'School B',
+    npsn: '22222222',
+    address: 'Jl. B',
+    village: 'V B',
+    district: 'D B',
+    regency: 'R B',
+    province: 'P B',
+    principalName: '',
+    principalNip: '',
+  });
+
+  // 8. active Principal A → School=A
+  const principalA = savePrincipalHistoryV5({
+    id: 'ph-a',
+    schoolId: schoolA.id,
+    name: 'Principal A',
+    nip: '9001',
+    isActive: true,
+    startDate: '2026-01-01',
+    createdAt: new Date().toISOString(),
+  });
+
+  let reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, 'Principal A');
+  assert.strictEqual(reloadedSchoolA.principalNip, '9001');
+
+  // 9. update Principal A isActive=false → zero active → School name/NIP kosong
+  savePrincipalHistoryV5({
+    ...principalA,
+    isActive: false,
+  });
+
+  reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, '');
+  assert.strictEqual(reloadedSchoolA.principalNip, '');
+
+  // 10. Principal A active + Principal B inactive → update B tetap inactive → School tetap A
+  // Reactivate A
+  savePrincipalHistoryV5({
+    ...principalA,
+    isActive: true,
+  });
+  reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, 'Principal A');
+
+  // Create B as inactive on School A
+  const principalB = savePrincipalHistoryV5({
+    id: 'ph-b',
+    schoolId: schoolA.id,
+    name: 'Principal B',
+    nip: '9002',
+    isActive: false,
+    startDate: '2026-06-01',
+    createdAt: new Date().toISOString(),
+  });
+
+  reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, 'Principal A'); // stays A
+
+  // Update B (still inactive)
+  savePrincipalHistoryV5({
+    ...principalB,
+    name: 'Principal B Updated',
+  });
+  reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, 'Principal A'); // stays A
+
+  // 11. activate B → A false → B true → School=B
+  setActivePrincipalV5(schoolA.id, 'ph-b');
+  reloadedSchoolA = getSchoolV5(schoolA.id)!;
+  assert.strictEqual(reloadedSchoolA.principalName, 'Principal B Updated');
+  assert.strictEqual(reloadedSchoolA.principalNip, '9002');
+
+  const stateObj = loadStorageV5();
+  const phA = stateObj.principalHistories.find((ph) => ph.id === 'ph-a')!;
+  const phB = stateObj.principalHistories.find((ph) => ph.id === 'ph-b')!;
+  assert.strictEqual(phA.isActive, false);
+  assert.strictEqual(phB.isActive, true);
+
+  // 12. mencoba update existing PrincipalHistory dengan schoolId berbeda → THROW → kedua School tidak berubah
+  assert.throws(() => {
+    savePrincipalHistoryV5({
+      ...phB,
+      schoolId: schoolB.id, // trying to change schoolId
+    });
+  }, /Cannot change schoolId/i);
+
+  assert.strictEqual(getSchoolV5(schoolA.id)!.principalName, 'Principal B Updated');
+  assert.strictEqual(getSchoolV5(schoolB.id)!.principalName, '');
+
+  // 13. delete inactive A ketika B active → School tetap B (A was false, B is active)
+  // Let's first make sure B is active and A is inactive
+  deletePrincipalHistoryV5('ph-a');
+  assert.strictEqual(getSchoolV5(schoolA.id)!.principalName, 'Principal B Updated');
+
+  // 14. delete active B → School kosong
+  deletePrincipalHistoryV5('ph-b');
+  assert.strictEqual(getSchoolV5(schoolA.id)!.principalName, '');
+  assert.strictEqual(getSchoolV5(schoolA.id)!.principalNip, '');
+
+  // 15. validate final states → PASS
   const finalState = loadStorageV5();
-  assert.strictEqual(finalState.activeProfileId, profB.id);
-  assert.strictEqual(finalState.activeYearPlanId, undefined);
-  assert.strictEqual(finalState.activeWorkspaceId, undefined);
-  assert.strictEqual(finalState.activeSemesterPlanId, undefined);
+  assert.doesNotThrow(() => validateStorageStateV5(finalState));
 });
 
 console.log(`\n========================================`);

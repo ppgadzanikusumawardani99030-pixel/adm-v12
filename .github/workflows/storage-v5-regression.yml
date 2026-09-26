@@ -49,6 +49,9 @@ jobs:
       - name: Test Storage V5 Relational Integrity
         run: npx tsx scripts/testStorageV5RelationalIntegrity.ts
 
+      - name: Test Storage V5 Runtime Read Model
+        run: npx tsx scripts/testRuntimeV5.ts
+
       - name: Test Storage V5 Contract
         run: npx tsx scripts/testStorageV5Contract.ts
 

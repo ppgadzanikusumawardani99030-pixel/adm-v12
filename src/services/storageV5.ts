@@ -561,28 +561,25 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
       throw new Error(`activeYearPlanId "${actYPId}" references non-existent yearPlan`);
     }
 
-    if (state.activeProfileId) {
-      if (actYP.profileId !== String(state.activeProfileId)) {
-        throw new Error(
-          `activeYearPlanId profileId "${actYP.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
-        );
-      }
-    }
-  }
-
-  if (state.activeSemesterPlanId !== undefined && state.activeSemesterPlanId !== null) {
-    const actSPId = String(state.activeSemesterPlanId);
-    const actSP = semesterPlanMap.get(actSPId);
-    if (!actSP) {
-      throw new Error(`activeSemesterPlanId "${actSPId}" references non-existent semesterPlan`);
+    if (!state.activeProfileId) {
+      throw new Error(`activeYearPlanId "${actYPId}" requires activeProfileId`);
     }
 
-    if (state.activeYearPlanId) {
-      if (actSP.yearPlanId !== String(state.activeYearPlanId)) {
-        throw new Error(
-          `activeSemesterPlanId yearPlanId "${actSP.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
-        );
-      }
+    if (actYP.profileId !== String(state.activeProfileId)) {
+      throw new Error(
+        `activeYearPlanId profileId "${actYP.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
+      );
+    }
+
+    if (!state.activeWorkspaceId) {
+      throw new Error(`activeYearPlanId "${actYPId}" requires activeWorkspaceId`);
+    }
+
+    const actWS = workspaceMap.get(String(state.activeWorkspaceId));
+    if (!actWS || actWS.yearPlanId !== actYPId) {
+      throw new Error(
+        `activeYearPlanId "${actYPId}" requires activeWorkspaceId to be workspace belonging to yearPlan`
+      );
     }
   }
 
@@ -593,20 +590,42 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
       throw new Error(`activeWorkspaceId "${actWSId}" references non-existent workspace`);
     }
 
-    if (state.activeYearPlanId) {
-      if (actWS.yearPlanId !== String(state.activeYearPlanId)) {
-        throw new Error(
-          `activeWorkspaceId yearPlanId "${actWS.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
-        );
-      }
+    if (!state.activeYearPlanId) {
+      throw new Error(`activeWorkspaceId "${actWSId}" requires activeYearPlanId`);
     }
 
-    if (state.activeProfileId) {
-      if (actWS.profileId !== String(state.activeProfileId)) {
-        throw new Error(
-          `activeWorkspaceId profileId "${actWS.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
-        );
-      }
+    if (actWS.yearPlanId !== String(state.activeYearPlanId)) {
+      throw new Error(
+        `activeWorkspaceId yearPlanId "${actWS.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
+      );
+    }
+
+    if (!state.activeProfileId) {
+      throw new Error(`activeWorkspaceId "${actWSId}" requires activeProfileId`);
+    }
+
+    if (actWS.profileId !== String(state.activeProfileId)) {
+      throw new Error(
+        `activeWorkspaceId profileId "${actWS.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
+      );
+    }
+  }
+
+  if (state.activeSemesterPlanId !== undefined && state.activeSemesterPlanId !== null) {
+    const actSPId = String(state.activeSemesterPlanId);
+    const actSP = semesterPlanMap.get(actSPId);
+    if (!actSP) {
+      throw new Error(`activeSemesterPlanId "${actSPId}" references non-existent semesterPlan`);
+    }
+
+    if (!state.activeYearPlanId) {
+      throw new Error(`activeSemesterPlanId "${actSPId}" requires activeYearPlanId`);
+    }
+
+    if (actSP.yearPlanId !== String(state.activeYearPlanId)) {
+      throw new Error(
+        `activeSemesterPlanId yearPlanId "${actSP.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
+      );
     }
   }
 
@@ -1547,7 +1566,8 @@ function setActiveProfileInState(state: AppStorageStateV5, profileId: string): v
     if (
       !activeWS ||
       activeWS.profileId !== profileId ||
-      (state.activeYearPlanId !== undefined && activeWS.yearPlanId !== state.activeYearPlanId)
+      !state.activeYearPlanId ||
+      activeWS.yearPlanId !== state.activeYearPlanId
     ) {
       state.activeWorkspaceId = undefined;
     }
@@ -1563,7 +1583,8 @@ function setActiveProfileInState(state: AppStorageStateV5, profileId: string): v
       !activeSP ||
       !parentYP ||
       parentYP.profileId !== profileId ||
-      (state.activeYearPlanId !== undefined && activeSP.yearPlanId !== state.activeYearPlanId)
+      !state.activeYearPlanId ||
+      activeSP.yearPlanId !== state.activeYearPlanId
     ) {
       state.activeSemesterPlanId = undefined;
     }
@@ -1804,6 +1825,29 @@ export function deleteSchoolV5(schoolId: string): void {
 // PRINCIPAL HISTORY MASTER DATA API
 // ============================================================================
 
+function syncSchoolPrincipalFromHistoriesInState(
+  state: AppStorageStateV5,
+  schoolId: string
+): void {
+  const school = state.schools.find((s) => s.id === schoolId);
+  if (!school) return;
+
+  const activeHistories = state.principalHistories.filter(
+    (ph) => ph.schoolId === schoolId && ph.isActive === true
+  );
+
+  if (activeHistories.length === 1) {
+    const active = activeHistories[0];
+    school.principalName = active.name;
+    school.principalNip = active.nip;
+    school.updatedAt = new Date().toISOString();
+  } else if (activeHistories.length === 0) {
+    school.principalName = '';
+    school.principalNip = '';
+    school.updatedAt = new Date().toISOString();
+  }
+}
+
 export function getPrincipalHistoriesV5(schoolId: string): PrincipalHistory[] {
   const state = loadStorageV5();
   return state.principalHistories.filter((ph) => ph.schoolId === schoolId);
@@ -1818,6 +1862,14 @@ export function savePrincipalHistoryV5(history: PrincipalHistory): PrincipalHist
   }
 
   const index = state.principalHistories.findIndex((ph) => ph.id === history.id);
+  if (index >= 0) {
+    const existingHistory = state.principalHistories[index];
+    if (existingHistory.schoolId !== history.schoolId) {
+      throw new Error(
+        `Cannot change schoolId for PrincipalHistory "${history.id}" from "${existingHistory.schoolId}" to "${history.schoolId}"`
+      );
+    }
+  }
 
   if (history.isActive === true) {
     for (const ph of state.principalHistories) {
@@ -1825,9 +1877,6 @@ export function savePrincipalHistoryV5(history: PrincipalHistory): PrincipalHist
         ph.isActive = false;
       }
     }
-    school.principalName = history.name;
-    school.principalNip = history.nip;
-    school.updatedAt = new Date().toISOString();
   }
 
   if (index >= 0) {
@@ -1835,6 +1884,8 @@ export function savePrincipalHistoryV5(history: PrincipalHistory): PrincipalHist
   } else {
     state.principalHistories.push({ ...history });
   }
+
+  syncSchoolPrincipalFromHistoriesInState(state, history.schoolId);
 
   saveStorageV5(state);
   return history;
@@ -1868,9 +1919,7 @@ export function setActivePrincipalV5(
     }
   }
 
-  school.principalName = history.name;
-  school.principalNip = history.nip;
-  school.updatedAt = new Date().toISOString();
+  syncSchoolPrincipalFromHistoriesInState(state, schoolId);
 
   saveStorageV5(state);
   return history;
@@ -1885,21 +1934,12 @@ export function deletePrincipalHistoryV5(historyId: string): void {
   }
 
   const targetHistory = state.principalHistories[index];
-  const school = state.schools.find((s) => s.id === targetHistory.schoolId);
-
-  if (targetHistory.isActive === true) {
-    if (school) {
-      school.principalName = '';
-      school.principalNip = '';
-      school.updatedAt = new Date().toISOString();
-    }
-  } else {
-    if (school) {
-      school.updatedAt = new Date().toISOString();
-    }
-  }
+  const schoolId = targetHistory.schoolId;
 
   state.principalHistories.splice(index, 1);
+
+  syncSchoolPrincipalFromHistoriesInState(state, schoolId);
+
   saveStorageV5(state);
 }
 
