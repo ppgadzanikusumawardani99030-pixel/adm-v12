@@ -2023,12 +2023,11 @@ export interface DuplicateYearHierarchyV5Overrides {
   documentDate?: string;
 }
 
-export function duplicateYearHierarchyV5(
+export function performDuplicateYearHierarchyInState(
+  state: AppStorageStateV5,
   sourceYearPlanId: string,
   overrides?: DuplicateYearHierarchyV5Overrides
 ): CreateYearHierarchyV5Result {
-  const state = loadStorageV5();
-
   // 1. Source Validation
   const sourceYP = state.yearPlans.find((yp) => yp.id === sourceYearPlanId);
   if (!sourceYP) {
@@ -2183,13 +2182,21 @@ export function duplicateYearHierarchyV5(
   state.activeWorkspaceId = newWorkspaceId;
   state.activeSemesterPlanId = undefined;
 
-  saveStorageV5(state);
-
   return {
     yearPlan: newYearPlan,
     workspace: newWorkspace,
     semesterPlans: [newSemesterPlan1, newSemesterPlan2],
   };
+}
+
+export function duplicateYearHierarchyV5(
+  sourceYearPlanId: string,
+  overrides?: DuplicateYearHierarchyV5Overrides
+): CreateYearHierarchyV5Result {
+  const state = loadStorageV5();
+  const result = performDuplicateYearHierarchyInState(state, sourceYearPlanId, overrides);
+  saveStorageV5(state);
+  return result;
 }
 
 export function duplicateWorkspaceV5(
@@ -2201,7 +2208,9 @@ export function duplicateWorkspaceV5(
   if (!ws) {
     throw new Error(`Workspace with ID "${sourceWorkspaceId}" not found`);
   }
-  return duplicateYearHierarchyV5(ws.yearPlanId, overrides);
+  const result = performDuplicateYearHierarchyInState(state, ws.yearPlanId, overrides);
+  saveStorageV5(state);
+  return result;
 }
 
 

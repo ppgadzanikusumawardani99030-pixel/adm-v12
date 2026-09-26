@@ -43,12 +43,21 @@ function runTest(name: string, fn: () => void) {
 // Mock localStorage in node environment
 class MockLocalStorage {
   private store: Map<string, string> = new Map();
+  public readCount = 0;
+  public writeCount = 0;
+
+  resetCounts(): void {
+    this.readCount = 0;
+    this.writeCount = 0;
+  }
 
   getItem(key: string): string | null {
+    this.readCount++;
     return this.store.has(key) ? this.store.get(key)! : null;
   }
 
   setItem(key: string, value: string): void {
+    this.writeCount++;
     this.store.set(key, String(value));
   }
 
@@ -58,6 +67,7 @@ class MockLocalStorage {
 
   clear(): void {
     this.store.clear();
+    this.resetCounts();
   }
 
   get length(): number {
@@ -637,6 +647,62 @@ runTest('35. save/load deepStrictEqual', () => {
 
   const reloaded = loadStorageV5();
   assert.deepStrictEqual(reloaded, savedState);
+});
+
+// =========================================================================
+// TEST 36: duplicateYearHierarchyV5 success → 1 read, 1 write
+// =========================================================================
+runTest('36. duplicateYearHierarchyV5 success → 1 read, 1 write', () => {
+  const { hier } = setupTestSource();
+  mockStorage.resetCounts();
+
+  duplicateYearHierarchyV5(hier.yearPlan.id, { academicYear: '2027/2028' });
+
+  assert.strictEqual(mockStorage.readCount, 1);
+  assert.strictEqual(mockStorage.writeCount, 1);
+});
+
+// =========================================================================
+// TEST 37: duplicateWorkspaceV5 success → 1 read, 1 write
+// =========================================================================
+runTest('37. duplicateWorkspaceV5 success → 1 read, 1 write', () => {
+  const { hier } = setupTestSource();
+  mockStorage.resetCounts();
+
+  duplicateWorkspaceV5(hier.workspace.id, { academicYear: '2027/2028' });
+
+  assert.strictEqual(mockStorage.readCount, 1);
+  assert.strictEqual(mockStorage.writeCount, 1);
+});
+
+// =========================================================================
+// TEST 38: invalid workspace → 1 read, 0 write
+// =========================================================================
+runTest('38. invalid workspace → 1 read, 0 write', () => {
+  setupTestSource();
+  mockStorage.resetCounts();
+
+  assert.throws(() => {
+    duplicateWorkspaceV5('ws-non-existent');
+  }, /Workspace with ID "ws-non-existent" not found/i);
+
+  assert.strictEqual(mockStorage.readCount, 1);
+  assert.strictEqual(mockStorage.writeCount, 0);
+});
+
+// =========================================================================
+// TEST 39: duplicate collision → 1 read, 0 write
+// =========================================================================
+runTest('39. duplicate collision → 1 read, 0 write', () => {
+  const { hier } = setupTestSource();
+  mockStorage.resetCounts();
+
+  assert.throws(() => {
+    duplicateYearHierarchyV5(hier.yearPlan.id);
+  }, /Duplicate YearPlan/i);
+
+  assert.strictEqual(mockStorage.readCount, 1);
+  assert.strictEqual(mockStorage.writeCount, 0);
 });
 
 console.log(`\n========================================`);
