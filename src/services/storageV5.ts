@@ -10,6 +10,9 @@ import {
   SemesterGradeEntry,
 } from '../types/storageV5';
 import {
+  TeacherProfile,
+  SchoolData,
+  PrincipalHistory,
   YearPlan,
   SemesterPlan,
   CurriculumType,
@@ -204,6 +207,7 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
   // Cast arrays for relational validation
   const profiles = state.profiles as Array<Record<string, unknown>>;
   const schools = state.schools as Array<Record<string, unknown>>;
+  const principalHistories = (state.principalHistories || []) as Array<Record<string, unknown>>;
   const workspaces = state.workspaces as Array<Record<string, unknown>>;
   const yearPlans = state.yearPlans as Array<Record<string, unknown>>;
   const semesterPlans = state.semesterPlans as Array<Record<string, unknown>>;
@@ -228,6 +232,7 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
 
   checkIdUniqueness(profiles, 'profiles');
   checkIdUniqueness(schools, 'schools');
+  checkIdUniqueness(principalHistories, 'principalHistories');
   checkIdUniqueness(workspaces, 'workspaces');
   checkIdUniqueness(yearPlans, 'yearPlans');
   checkIdUniqueness(semesterPlans, 'semesterPlans');
@@ -248,6 +253,38 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
   const workspaceMap = new Map<string, Record<string, unknown>>(
     workspaces.map((ws) => [ws.id as string, ws])
   );
+
+  // Profile school relation
+  for (const prof of profiles) {
+    const profId = prof.id as string;
+    const schId = prof.schoolId as string | undefined;
+    if (schId && typeof schId === 'string' && schId.trim() !== '') {
+      if (!schoolMap.has(schId)) {
+        throw new Error(
+          `Profile "${profId}" references non-existent schoolId "${schId}"`
+        );
+      }
+    }
+  }
+
+  // PrincipalHistory relations & active limit
+  const activePrincipalCounts = new Map<string, number>();
+  for (const ph of principalHistories) {
+    const phId = ph.id as string;
+    const schId = ph.schoolId as string;
+    if (!schId || typeof schId !== 'string' || !schoolMap.has(schId)) {
+      throw new Error(
+        `PrincipalHistory "${phId}" references non-existent schoolId "${schId}"`
+      );
+    }
+    if (ph.isActive === true) {
+      const count = (activePrincipalCounts.get(schId) || 0) + 1;
+      if (count > 1) {
+        throw new Error(`School "${schId}" has multiple active PrincipalHistories`);
+      }
+      activePrincipalCounts.set(schId, count);
+    }
+  }
 
   // 2. YearPlan Relations
   for (const yp of yearPlans) {
@@ -1482,6 +1519,350 @@ export function deleteEnrichmentV5(semesterPlanId: string): void {
   if (changed) {
     saveStorageV5(state);
   }
+}
+
+// ============================================================================
+// PROFILE MASTER DATA API
+// ============================================================================
+
+export function getProfileV5(profileId: string): TeacherProfile | undefined {
+  const state = loadStorageV5();
+  return state.profiles.find((p) => p.id === profileId);
+}
+
+export function createProfileV5(
+  profile: Omit<TeacherProfile, 'id' | 'createdAt' | 'updatedAt'>
+): TeacherProfile {
+  const state = loadStorageV5();
+
+  if (profile.schoolId && profile.schoolId.trim() !== '') {
+    const schoolExists = state.schools.some((s) => s.id === profile.schoolId);
+    if (!schoolExists) {
+      throw new Error(`School with ID "${profile.schoolId}" not found`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const newProfile: TeacherProfile = {
+    ...profile,
+    id: `prof-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  state.profiles.push(newProfile);
+  state.activeProfileId = newProfile.id;
+
+  if (state.activeYearPlanId) {
+    const activeYP = state.yearPlans.find((yp) => yp.id === state.activeYearPlanId);
+    if (!activeYP || activeYP.profileId !== newProfile.id) {
+      state.activeYearPlanId = undefined;
+      state.activeWorkspaceId = undefined;
+      state.activeSemesterPlanId = undefined;
+    }
+  }
+
+  saveStorageV5(state);
+  return newProfile;
+}
+
+export function updateProfileV5(
+  profileId: string,
+  updates: Partial<TeacherProfile>
+): TeacherProfile {
+  const state = loadStorageV5();
+
+  const index = state.profiles.findIndex((p) => p.id === profileId);
+  if (index === -1) {
+    throw new Error(`Profile with ID "${profileId}" not found`);
+  }
+
+  const existingProfile = state.profiles[index];
+
+  if (updates.schoolId !== undefined && updates.schoolId.trim() !== '') {
+    const schoolExists = state.schools.some((s) => s.id === updates.schoolId);
+    if (!schoolExists) {
+      throw new Error(`School with ID "${updates.schoolId}" not found`);
+    }
+  }
+
+  const isSchoolChanging =
+    updates.schoolId !== undefined && updates.schoolId !== existingProfile.schoolId;
+
+  if (isSchoolChanging) {
+    const hasYearPlan = state.yearPlans.some((yp) => yp.profileId === profileId);
+    const hasWorkspace = state.workspaces.some((ws) => ws.profileId === profileId);
+
+    if (hasYearPlan || hasWorkspace) {
+      throw new Error(
+        `Cannot change schoolId for profile "${profileId}" because it already has YearPlans or Workspaces`
+      );
+    }
+  }
+
+  const now = new Date().toISOString();
+  const updatedProfile: TeacherProfile = {
+    ...existingProfile,
+    ...updates,
+    id: existingProfile.id,
+    createdAt: existingProfile.createdAt,
+    updatedAt: now,
+  };
+
+  state.profiles[index] = updatedProfile;
+  saveStorageV5(state);
+  return updatedProfile;
+}
+
+export function deleteProfileV5(profileId: string): void {
+  const state = loadStorageV5();
+
+  const profileIndex = state.profiles.findIndex((p) => p.id === profileId);
+  if (profileIndex === -1) {
+    throw new Error(`Profile with ID "${profileId}" not found`);
+  }
+
+  const hasYearPlan = state.yearPlans.some((yp) => yp.profileId === profileId);
+  const hasWorkspace = state.workspaces.some((ws) => ws.profileId === profileId);
+
+  if (hasYearPlan || hasWorkspace) {
+    throw new Error(
+      `Cannot delete profile "${profileId}" because it has associated YearPlans or Workspaces`
+    );
+  }
+
+  state.profiles.splice(profileIndex, 1);
+
+  if (state.activeProfileId === profileId) {
+    state.activeProfileId = undefined;
+  }
+
+  saveStorageV5(state);
+}
+
+export function setActiveProfileV5(profileId: string): void {
+  const state = loadStorageV5();
+
+  const profileExists = state.profiles.some((p) => p.id === profileId);
+  if (!profileExists) {
+    throw new Error(`Profile with ID "${profileId}" not found`);
+  }
+
+  state.activeProfileId = profileId;
+
+  if (state.activeYearPlanId) {
+    const activeYP = state.yearPlans.find((yp) => yp.id === state.activeYearPlanId);
+    if (!activeYP || activeYP.profileId !== profileId) {
+      state.activeYearPlanId = undefined;
+      state.activeWorkspaceId = undefined;
+      state.activeSemesterPlanId = undefined;
+    }
+  }
+
+  saveStorageV5(state);
+}
+
+// ============================================================================
+// SCHOOL MASTER DATA API
+// ============================================================================
+
+export function getSchoolV5(schoolId: string): SchoolData | undefined {
+  const state = loadStorageV5();
+  return state.schools.find((s) => s.id === schoolId);
+}
+
+export function createSchoolV5(
+  school: Omit<SchoolData, 'id' | 'createdAt' | 'updatedAt'>
+): SchoolData {
+  const state = loadStorageV5();
+
+  const trimmedNPSN = (school.npsn || '').trim();
+  if (trimmedNPSN !== '') {
+    const isDup = state.schools.some((s) => (s.npsn || '').trim() === trimmedNPSN);
+    if (isDup) {
+      throw new Error(`Duplicate NPSN "${trimmedNPSN}" found`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const newSchool: SchoolData = {
+    ...school,
+    npsn: trimmedNPSN,
+    id: `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  state.schools.push(newSchool);
+  saveStorageV5(state);
+  return newSchool;
+}
+
+export function updateSchoolV5(
+  schoolId: string,
+  updates: Partial<SchoolData>
+): SchoolData {
+  const state = loadStorageV5();
+
+  const index = state.schools.findIndex((s) => s.id === schoolId);
+  if (index === -1) {
+    throw new Error(`School with ID "${schoolId}" not found`);
+  }
+
+  const existingSchool = state.schools[index];
+
+  if (updates.npsn !== undefined) {
+    const trimmedNPSN = updates.npsn.trim();
+    if (trimmedNPSN !== '' && trimmedNPSN !== (existingSchool.npsn || '').trim()) {
+      const isDup = state.schools.some(
+        (s) => s.id !== schoolId && (s.npsn || '').trim() === trimmedNPSN
+      );
+      if (isDup) {
+        throw new Error(`Duplicate NPSN "${trimmedNPSN}" found for another school`);
+      }
+    }
+  }
+
+  const now = new Date().toISOString();
+  const updatedSchool: SchoolData = {
+    ...existingSchool,
+    ...updates,
+    npsn: updates.npsn !== undefined ? updates.npsn.trim() : existingSchool.npsn,
+    id: existingSchool.id,
+    createdAt: existingSchool.createdAt,
+    updatedAt: now,
+  };
+
+  state.schools[index] = updatedSchool;
+  saveStorageV5(state);
+  return updatedSchool;
+}
+
+export function deleteSchoolV5(schoolId: string): void {
+  const state = loadStorageV5();
+
+  const schoolIndex = state.schools.findIndex((s) => s.id === schoolId);
+  if (schoolIndex === -1) {
+    throw new Error(`School with ID "${schoolId}" not found`);
+  }
+
+  const isProfileRef = state.profiles.some((p) => p.schoolId === schoolId);
+  const isYearPlanRef = state.yearPlans.some((yp) => yp.schoolId === schoolId);
+  const isWorkspaceRef = state.workspaces.some((ws) => ws.schoolId === schoolId);
+
+  if (isProfileRef || isYearPlanRef || isWorkspaceRef) {
+    throw new Error(
+      `Cannot delete school "${schoolId}" because it is referenced by profiles, yearPlans, or workspaces`
+    );
+  }
+
+  state.schools.splice(schoolIndex, 1);
+  state.principalHistories = state.principalHistories.filter((ph) => ph.schoolId !== schoolId);
+
+  saveStorageV5(state);
+}
+
+// ============================================================================
+// PRINCIPAL HISTORY MASTER DATA API
+// ============================================================================
+
+export function getPrincipalHistoriesV5(schoolId: string): PrincipalHistory[] {
+  const state = loadStorageV5();
+  return state.principalHistories.filter((ph) => ph.schoolId === schoolId);
+}
+
+export function savePrincipalHistoryV5(history: PrincipalHistory): PrincipalHistory {
+  const state = loadStorageV5();
+
+  const school = state.schools.find((s) => s.id === history.schoolId);
+  if (!school) {
+    throw new Error(`School with ID "${history.schoolId}" not found`);
+  }
+
+  const index = state.principalHistories.findIndex((ph) => ph.id === history.id);
+
+  if (history.isActive === true) {
+    for (const ph of state.principalHistories) {
+      if (ph.schoolId === history.schoolId && ph.id !== history.id) {
+        ph.isActive = false;
+      }
+    }
+    school.principalName = history.name;
+    school.principalNip = history.nip;
+    school.updatedAt = new Date().toISOString();
+  }
+
+  if (index >= 0) {
+    state.principalHistories[index] = { ...history };
+  } else {
+    state.principalHistories.push({ ...history });
+  }
+
+  saveStorageV5(state);
+  return history;
+}
+
+export function setActivePrincipalV5(
+  schoolId: string,
+  historyId: string
+): PrincipalHistory {
+  const state = loadStorageV5();
+
+  const school = state.schools.find((s) => s.id === schoolId);
+  if (!school) {
+    throw new Error(`School with ID "${schoolId}" not found`);
+  }
+
+  const history = state.principalHistories.find((ph) => ph.id === historyId);
+  if (!history) {
+    throw new Error(`PrincipalHistory with ID "${historyId}" not found`);
+  }
+
+  if (history.schoolId !== schoolId) {
+    throw new Error(
+      `PrincipalHistory "${historyId}" belongs to school "${history.schoolId}", not requested school "${schoolId}"`
+    );
+  }
+
+  for (const ph of state.principalHistories) {
+    if (ph.schoolId === schoolId) {
+      ph.isActive = ph.id === historyId;
+    }
+  }
+
+  school.principalName = history.name;
+  school.principalNip = history.nip;
+  school.updatedAt = new Date().toISOString();
+
+  saveStorageV5(state);
+  return history;
+}
+
+export function deletePrincipalHistoryV5(historyId: string): void {
+  const state = loadStorageV5();
+
+  const index = state.principalHistories.findIndex((ph) => ph.id === historyId);
+  if (index === -1) {
+    throw new Error(`PrincipalHistory with ID "${historyId}" not found`);
+  }
+
+  const targetHistory = state.principalHistories[index];
+  const school = state.schools.find((s) => s.id === targetHistory.schoolId);
+
+  if (targetHistory.isActive === true) {
+    if (school) {
+      school.principalName = '';
+      school.principalNip = '';
+      school.updatedAt = new Date().toISOString();
+    }
+  } else {
+    if (school) {
+      school.updatedAt = new Date().toISOString();
+    }
+  }
+
+  state.principalHistories.splice(index, 1);
+  saveStorageV5(state);
 }
 
 
