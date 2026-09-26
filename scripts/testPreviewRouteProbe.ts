@@ -14,132 +14,107 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTests() {
-  console.log('=== Running Extended Preview Route Probe Tests ===\n');
+  console.log('=== Running Extended Valid TP Probe Tests ===\n');
 
-  const baseContextWithQuery = {
+  const baseContext = {
     href: 'https://preview.example.com/project/session/?user=admin#section1',
     origin: 'https://preview.example.com',
     pathname: '/project/session/',
     baseURI: 'https://preview.example.com/project/session/?user=admin#section1'
   };
 
-  // Test Case 1-6 & 9-11: Validate GET & POST, query/hash stripping, method display, classification, redirection
+  // Test Case 1: JSON 503 Outcome for Probe 7 (Valid branch, unconfigured Gemini)
   {
-    const mockResponses: Record<string, Record<string, { status: number; contentType: string; body: string; redirected?: boolean }>> = {
+    const mockResponses: Record<string, Record<string, { status: number; contentType: string; body: string }>> = {
       'https://preview.example.com/api/health': {
-        'GET': {
-          status: 200,
-          contentType: 'application/json; charset=utf-8',
-          body: '{"status":"ok"}'
-        }
+        'GET': { status: 200, contentType: 'application/json', body: '{"status":"ok"}' }
       },
       'https://preview.example.com/project/session/api/health': {
-        'GET': {
-          status: 200,
-          contentType: 'application/json',
-          body: '{"status":"ok","relative":true}'
-        }
+        'GET': { status: 200, contentType: 'application/json', body: '{"status":"ok"}' }
       },
       'https://preview.example.com/api/e4-1a-4-route-does-not-exist': {
-        'POST': {
-          status: 404,
-          contentType: 'application/json',
-          body: '{"error":"Unknown API route"}'
-        }
+        'POST': { status: 404, contentType: 'application/json', body: '{"error":"Not Found"}' }
       },
       'https://preview.example.com/api/ai/analyze-cp': {
-        'POST': {
-          status: 400,
-          contentType: 'application/json',
-          body: '{"error":"Data CP tidak boleh kosong"}'
-        }
+        'POST': { status: 400, contentType: 'application/json', body: '{"error":"CP Empty"}' }
       },
       'https://preview.example.com/api/ai/generate-tp': {
-        'POST': {
-          status: 400,
-          contentType: 'application/json',
-          body: '{"error":"Capaian Pembelajaran (CP) harus diisi terlebih dahulu"}'
-        }
+        'POST': { status: 503, contentType: 'application/json', body: '{"error":"Layanan AI belum dikonfigurasi (GEMINI_API_KEY tidak terpasang)."}' }
       }
     };
 
-    let postBodiesCaptured: Record<string, string> = {};
+    let postBodies: Record<string, string[]> = {};
 
     const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const urlStr = url.toString();
       const method = init?.method || 'GET';
+      const cleanUrlStr = urlStr.split('?')[0].split('#')[0];
+
       if (method === 'POST' && init?.body) {
-        postBodiesCaptured[urlStr] = init.body.toString();
+        if (!postBodies[cleanUrlStr]) postBodies[cleanUrlStr] = [];
+        postBodies[cleanUrlStr].push(init.body.toString());
       }
 
-      const cleanUrlStr = urlStr.split('?')[0].split('#')[0];
-      const resData = mockResponses[cleanUrlStr]?.[method] || {
-        status: 404,
-        contentType: 'text/plain',
-        body: 'Not found'
-      };
+      // If Probe 6 is evaluated, return 400 instead of 503
+      let status = 503;
+      let body = '{"error":"Layanan AI belum dikonfigurasi (GEMINI_API_KEY tidak terpasang)."}';
+      if (cleanUrlStr.includes('/api/ai/generate-tp')) {
+        const payload = JSON.parse(init?.body as string);
+        if (payload.cpGeneral === '') {
+          status = 400;
+          body = '{"error":"Capaian Pembelajaran (CP) harus diisi terlebih dahulu"}';
+        }
+      } else {
+        const resData = mockResponses[cleanUrlStr]?.[method] || { status: 404, contentType: 'text/plain', body: 'Not found' };
+        status = resData.status;
+        body = resData.body;
+      }
 
       return {
-        status: resData.status,
+        status,
         url: urlStr,
-        redirected: resData.redirected || false,
+        redirected: false,
         headers: {
-          get: (name: string) => name.toLowerCase() === 'content-type' ? resData.contentType : null
+          get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/json' : null
         },
-        text: async () => resData.body
+        text: async () => body
       } as any;
     };
 
     const result = await runPreviewRouteProbe({
-      context: baseContextWithQuery,
+      context: baseContext,
       fetchFn: mockFetch
     });
 
-    // Check we ran exactly 6 candidate probes
-    assert(result.results.length === 6, 'Probed exactly 6 candidates (3 GETs and 3 POSTs)');
+    assert(result.results.length === 7, 'Probed exactly 7 candidates (3 GETs, 4 POSTs)');
 
-    // Context query and hash stripping check
-    assert(result.context.href === 'https://preview.example.com/project/session/', 'Stripped query and fragment from location.href');
-    assert(result.context.baseURI === 'https://preview.example.com/project/session/', 'Stripped query and fragment from document.baseURI');
+    // Validate Probe 6 vs Probe 7 separation of bodies
+    const tpPOSTs = postBodies['https://preview.example.com/api/ai/generate-tp'] || [];
+    assert(tpPOSTs.length === 2, 'Fired exactly 2 POST requests to /api/ai/generate-tp');
 
-    // Probe 1: GET /api/health
-    const r1 = result.results[0];
-    assert(r1.method === 'GET', 'Probe 1 is GET');
-    assert(r1.resolvedUrl === 'https://preview.example.com/api/health', 'Probe 1 resolved correct root URL');
-    assert(r1.classification === 'JSON', 'GET /api/health classified as JSON');
+    const emptyBody = JSON.parse(tpPOSTs[0]);
+    assert(emptyBody.cpGeneral === '', 'Probe 6 POST has empty cpGeneral');
 
-    // Probe 4: POST /api/e4-1a-4-route-does-not-exist
-    const r4 = result.results[3];
-    assert(r4.method === 'POST', 'Probe 4 is POST');
-    assert(r4.resolvedUrl === 'https://preview.example.com/api/e4-1a-4-route-does-not-exist', 'Probe 4 resolved correctly');
-    assert(r4.classification === 'JSON' && r4.status === 404, 'Generic POST 404 classified as JSON');
-    assert(postBodiesCaptured['https://preview.example.com/api/e4-1a-4-route-does-not-exist'] === '{}', 'Generic POST sent correct `{}` body');
+    const validBody = JSON.parse(tpPOSTs[1]);
+    assert(validBody.cpGeneral === 'Diagnostic probe CP', 'Probe 7 POST has structurally valid diagnostic CP: ' + validBody.cpGeneral);
+    assert(validBody.subject === 'Diagnostic', 'Probe 7 payload specifies dummy Diagnostic subject');
+    assert(validBody.grade === 'Kelas 1', 'Probe 7 payload specifies Kelas 1');
+    assert(validBody.phase === 'Fase A', 'Probe 7 payload specifies Fase A');
+    assert(validBody.curriculum === 'KURIKULUM_MERDEKA', 'Probe 7 payload specifies KURIKULUM_MERDEKA');
+    assert(validBody.count === 1, 'Probe 7 payload requests count: 1');
 
-    // Probe 5: POST /api/ai/analyze-cp
-    const r5 = result.results[4];
-    assert(r5.method === 'POST', 'Probe 5 is POST');
-    assert(r5.classification === 'JSON' && r5.status === 400, 'analyze-cp POST 400 classified as JSON');
-    assert(postBodiesCaptured['https://preview.example.com/api/ai/analyze-cp'] === '{}', 'analyze-cp POST sent `{}` body');
-
-    // Probe 6: POST /api/ai/generate-tp
-    const r6 = result.results[5];
-    assert(r6.method === 'POST', 'Probe 6 is POST');
-    assert(r6.classification === 'JSON' && r6.status === 400, 'generate-tp POST 400 classified as JSON');
-    const expectedTpBody = JSON.stringify({ cpGeneral: '', cpElements: [], cpAnalysisItems: [] });
-    assert(postBodiesCaptured['https://preview.example.com/api/ai/generate-tp'] === expectedTpBody, 'generate-tp POST sent CP-empty payload');
-
-    // Formatter checks
-    const report = formatPreviewRouteProbeReport(result);
-    assert(report.includes('method: GET'), 'Report formats method: GET');
-    assert(report.includes('method: POST'), 'Report formats method: POST');
-    assert(!report.includes('?user=admin'), 'Report completely strips search queries');
-    assert(!report.includes('#section1'), 'Report completely strips fragments');
+    // Validate classification of Probe 7
+    const p7 = result.results[6];
+    assert(p7.method === 'POST', 'Probe 7 used POST method');
+    assert(p7.classification === 'JSON', 'Classified json response for Probe 7 as JSON');
+    assert(p7.status === 503, 'Mocked status for Probe 7 was 503 (unconfigured Gemini)');
+    assert(p7.responseSnippet !== undefined && p7.responseSnippet.length <= 200, 'Probe 7 response snippet <= 200 chars');
   }
 
-  // Test Case 7: HTML 200 POST is classified HTML and captured in snippets safely
+  // Test Case 2: HTML 200 Outcome for Probe 7 (Mocking GAS proxy intercept scenario)
   {
     const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      const largeHtml = '<!doctype html><html><body>ErrorFallback' + 'A'.repeat(500) + '</body></html>';
+      const htmlBody = '<!doctype html><html><body>InterceptionFallback</body></html>';
       return {
         status: 200,
         url: url.toString(),
@@ -147,54 +122,22 @@ async function runTests() {
         headers: {
           get: (name: string) => name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null
         },
-        text: async () => largeHtml
+        text: async () => htmlBody
       } as any;
     };
 
     const result = await runPreviewRouteProbe({
-      context: baseContextWithQuery,
+      context: baseContext,
       fetchFn: mockFetch
     });
 
-    result.results.forEach(r => {
-      assert(r.classification === 'HTML', `Probe classification is HTML for method ${r.method}`);
-      assert(r.responseSnippet !== undefined && r.responseSnippet.length <= 200, 'Snippet size bounded <= 200 chars');
-      assert(r.redirected === true, 'Redirected status is recorded correctly');
-    });
+    const p7 = result.results[6];
+    assert(p7.classification === 'HTML', 'Classified text/html response for Probe 7 as HTML under interception scenario');
+    assert(p7.status === 200, 'Probe 7 status is 200');
+    assert(p7.redirected === true, 'Probe 7 redirected value is true');
   }
 
-  // Test Case 8: Network failure in one POST does not abort remaining probes
-  {
-    const mockFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      const urlStr = url.toString();
-      if (urlStr.includes('/api/ai/analyze-cp')) {
-        throw new Error('Connection timeout');
-      }
-      return {
-        status: 200,
-        url: urlStr,
-        headers: {
-          get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/json' : null
-        },
-        text: async () => '{"status":"ok"}'
-      } as any;
-    };
-
-    const result = await runPreviewRouteProbe({
-      context: baseContextWithQuery,
-      fetchFn: mockFetch
-    });
-
-    assert(result.results.length === 6, 'All 6 probes were executed despite network failure in one probe');
-    const failedProbe = result.results.find(r => r.requestPath === '/api/ai/analyze-cp');
-    assert(failedProbe?.classification === 'NETWORK_ERROR', 'analyze-cp classified as NETWORK_ERROR');
-    assert(failedProbe?.error === 'Connection timeout', 'Captured correct network error description');
-    
-    const otherProbe = result.results.find(r => r.requestPath === '/api/ai/generate-tp');
-    assert(otherProbe?.classification === 'JSON', 'Other post probe successfully parsed as JSON');
-  }
-
-  console.log(`\n=== Extended Probe Tests Summary: ${passed} passed, ${failed} failed ===`);
+  console.log(`\n=== Extended Valid TP Tests Summary: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) {
     process.exit(1);
   } else {

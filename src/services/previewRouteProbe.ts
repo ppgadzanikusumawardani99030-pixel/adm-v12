@@ -75,6 +75,20 @@ export async function runPreviewRouteProbe(options?: {
         cpElements: [],
         cpAnalysisItems: []
       })
+    },
+    {
+      method: 'POST',
+      path: '/api/ai/generate-tp',
+      body: JSON.stringify({
+        cpGeneral: 'Diagnostic probe CP',
+        cpElements: [],
+        cpAnalysisItems: [],
+        subject: 'Diagnostic',
+        grade: 'Kelas 1',
+        phase: 'Fase A',
+        curriculum: 'KURIKULUM_MERDEKA',
+        count: 1
+      })
     }
   ];
 
@@ -127,7 +141,7 @@ export async function runPreviewRouteProbe(options?: {
       const responseText = await response.text();
       const textSnippet = responseText.substring(0, 200).trim();
 
-      let classification: 'JSON' | 'HTML' | 'OTHER' = 'OTHER';
+      let classification: 'JSON' | 'HTML' | 'OTHER' | 'NETWORK_ERROR' = 'OTHER';
       if (contentType.toLowerCase().includes('application/json')) {
         classification = 'JSON';
       } else if (
