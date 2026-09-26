@@ -61,6 +61,9 @@ jobs:
       - name: Test AI Transport Hardening
         run: npx tsx scripts/testAITransportHardening.ts
 
+      - name: Test Development Server Runtime
+        run: npx tsx scripts/testDevelopmentServerSmoke.ts
+
       - name: Run Linter
         run: npm run lint
 
