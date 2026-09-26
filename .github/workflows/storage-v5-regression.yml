@@ -58,8 +58,14 @@ jobs:
       - name: Test F1 Annual & Semester Scope Contract
         run: npx tsx scripts/testF1AnnualSemesterScopeContract.ts
 
+      - name: Test AI Transport Hardening
+        run: npx tsx scripts/testAITransportHardening.ts
+
       - name: Run Linter
         run: npm run lint
 
       - name: Build Production
         run: npm run build
+
+      - name: Run Production Server Smoke Tests
+        run: npx tsx scripts/testProductionServerSmoke.ts
