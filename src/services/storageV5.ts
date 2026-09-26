@@ -151,7 +151,8 @@ function assertObject(
 }
 
 /**
- * Validates that an unknown value conforms strictly to AppStorageStateV5.
+ * Validates that an unknown value conforms strictly to AppStorageStateV5,
+ * including structural checks, root ID uniqueness, and relational integrity.
  * Does not mutate, drop, or normalize fields.
  */
 export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
@@ -200,6 +201,365 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
   assertArray(semesterData, 'remedial', 'data.semesterData');
   assertArray(semesterData, 'enrichment', 'data.semesterData');
 
+  // Cast arrays for relational validation
+  const profiles = state.profiles as Array<Record<string, unknown>>;
+  const schools = state.schools as Array<Record<string, unknown>>;
+  const workspaces = state.workspaces as Array<Record<string, unknown>>;
+  const yearPlans = state.yearPlans as Array<Record<string, unknown>>;
+  const semesterPlans = state.semesterPlans as Array<Record<string, unknown>>;
+
+  // 1. Root ID uniqueness
+  const checkIdUniqueness = (arr: Array<Record<string, unknown>>, name: string) => {
+    const seen = new Set<string>();
+    for (const item of arr) {
+      if (!item || typeof item !== 'object') {
+        throw new Error(`Invalid item in "${name}": must be an object`);
+      }
+      const id = item.id;
+      if (typeof id !== 'string' || !id.trim()) {
+        throw new Error(`Missing or invalid "id" in "${name}" item`);
+      }
+      if (seen.has(id)) {
+        throw new Error(`Duplicate ID "${id}" found in "${name}"`);
+      }
+      seen.add(id);
+    }
+  };
+
+  checkIdUniqueness(profiles, 'profiles');
+  checkIdUniqueness(schools, 'schools');
+  checkIdUniqueness(workspaces, 'workspaces');
+  checkIdUniqueness(yearPlans, 'yearPlans');
+  checkIdUniqueness(semesterPlans, 'semesterPlans');
+
+  // Create Maps for fast relational checks
+  const profileMap = new Map<string, Record<string, unknown>>(
+    profiles.map((p) => [p.id as string, p])
+  );
+  const schoolMap = new Map<string, Record<string, unknown>>(
+    schools.map((s) => [s.id as string, s])
+  );
+  const yearPlanMap = new Map<string, Record<string, unknown>>(
+    yearPlans.map((yp) => [yp.id as string, yp])
+  );
+  const semesterPlanMap = new Map<string, Record<string, unknown>>(
+    semesterPlans.map((sp) => [sp.id as string, sp])
+  );
+  const workspaceMap = new Map<string, Record<string, unknown>>(
+    workspaces.map((ws) => [ws.id as string, ws])
+  );
+
+  // 2. YearPlan Relations
+  for (const yp of yearPlans) {
+    const profileId = yp.profileId as string;
+    const schoolId = yp.schoolId as string;
+
+    const profile = profileMap.get(profileId);
+    if (!profile) {
+      throw new Error(
+        `YearPlan "${yp.id}" references non-existent profileId "${profileId}"`
+      );
+    }
+
+    const school = schoolMap.get(schoolId);
+    if (!school) {
+      throw new Error(
+        `YearPlan "${yp.id}" references non-existent schoolId "${schoolId}"`
+      );
+    }
+
+    if (profile.schoolId && profile.schoolId !== schoolId) {
+      throw new Error(
+        `YearPlan "${yp.id}" profile school mismatch: profile.schoolId "${profile.schoolId}" !== yearPlan.schoolId "${schoolId}"`
+      );
+    }
+  }
+
+  // 3. Workspace Relations & 1 YearPlan ↔ 1 Workspace
+  const yearPlanWorkspaceCounts = new Map<string, number>();
+  for (const ws of workspaces) {
+    const yearPlanId = ws.yearPlanId as string;
+    const parentYP = yearPlanMap.get(yearPlanId);
+    if (!parentYP) {
+      throw new Error(
+        `Workspace "${ws.id}" references non-existent yearPlanId "${yearPlanId}"`
+      );
+    }
+
+    if (ws.profileId !== parentYP.profileId) {
+      throw new Error(
+        `Workspace "${ws.id}" profileId "${ws.profileId}" does not match parent YearPlan profileId "${parentYP.profileId}"`
+      );
+    }
+
+    if (ws.schoolId !== parentYP.schoolId) {
+      throw new Error(
+        `Workspace "${ws.id}" schoolId "${ws.schoolId}" does not match parent YearPlan schoolId "${parentYP.schoolId}"`
+      );
+    }
+
+    yearPlanWorkspaceCounts.set(
+      yearPlanId,
+      (yearPlanWorkspaceCounts.get(yearPlanId) || 0) + 1
+    );
+  }
+
+  for (const yp of yearPlans) {
+    const ypId = yp.id as string;
+    const count = yearPlanWorkspaceCounts.get(ypId) || 0;
+    if (count === 0) {
+      throw new Error(`YearPlan "${ypId}" does not have a matching Workspace`);
+    }
+    if (count > 1) {
+      throw new Error(`YearPlan "${ypId}" has duplicate Workspaces (${count})`);
+    }
+  }
+
+  // 4. SemesterPlan Relations & 1 YearPlan ↔ 2 SemesterPlans (Sem 1 & Sem 2)
+  const yearPlanSemesterCounts = new Map<string, { sem1: number; sem2: number }>();
+
+  for (const sp of semesterPlans) {
+    const yearPlanId = sp.yearPlanId as string;
+    if (!yearPlanMap.has(yearPlanId)) {
+      throw new Error(
+        `Parent YearPlan "${yearPlanId}" not found for SemesterPlan "${sp.id}"`
+      );
+    }
+
+    const sem = Number(sp.semester);
+    if (sem !== 1 && sem !== 2) {
+      throw new Error(
+        `SemesterPlan "${sp.id}" invalid semester value "${String(sp.semester)}": expected 1 or 2`
+      );
+    }
+
+    if (!yearPlanSemesterCounts.has(yearPlanId)) {
+      yearPlanSemesterCounts.set(yearPlanId, { sem1: 0, sem2: 0 });
+    }
+    const counts = yearPlanSemesterCounts.get(yearPlanId)!;
+    if (sem === 1) counts.sem1++;
+    if (sem === 2) counts.sem2++;
+  }
+
+  for (const yp of yearPlans) {
+    const ypId = yp.id as string;
+    const counts = yearPlanSemesterCounts.get(ypId) || { sem1: 0, sem2: 0 };
+    if (counts.sem1 !== 1) {
+      throw new Error(
+        `YearPlan "${ypId}" must have exactly 1 SemesterPlan for Semester 1 (found ${counts.sem1})`
+      );
+    }
+    if (counts.sem2 !== 1) {
+      throw new Error(
+        `YearPlan "${ypId}" must have exactly 1 SemesterPlan for Semester 2 (found ${counts.sem2})`
+      );
+    }
+  }
+
+  // 5. Year Scoped Entries Validation
+  const validateYearScopedCollection = (
+    arr: Array<Record<string, unknown>>,
+    collName: string
+  ) => {
+    const seenYearPlans = new Set<string>();
+    for (const entry of arr) {
+      if (!entry || typeof entry !== 'object') {
+        throw new Error(`Invalid entry in "${collName}"`);
+      }
+      const ypId = entry.yearPlanId as string;
+      if (!ypId || typeof ypId !== 'string') {
+        throw new Error(`Entry in "${collName}" missing valid "yearPlanId"`);
+      }
+      if (!yearPlanMap.has(ypId)) {
+        throw new Error(
+          `Entry in "${collName}" references non-existent yearPlanId "${ypId}"`
+        );
+      }
+      if (seenYearPlans.has(ypId)) {
+        throw new Error(
+          `Duplicate entry for yearPlanId "${ypId}" in collection "${collName}"`
+        );
+      }
+      seenYearPlans.add(ypId);
+    }
+  };
+
+  validateYearScopedCollection(
+    state.annualJPReferences as Array<Record<string, unknown>>,
+    'annualJPReferences'
+  );
+  validateYearScopedCollection(
+    annualData.cp as Array<Record<string, unknown>>,
+    'annualData.cp'
+  );
+  validateYearScopedCollection(
+    annualData.cpAnalysis as Array<Record<string, unknown>>,
+    'annualData.cpAnalysis'
+  );
+  validateYearScopedCollection(
+    annualData.tp as Array<Record<string, unknown>>,
+    'annualData.tp'
+  );
+  validateYearScopedCollection(
+    annualData.atp as Array<Record<string, unknown>>,
+    'annualData.atp'
+  );
+  validateYearScopedCollection(
+    annualData.curriculumContext as Array<Record<string, unknown>>,
+    'annualData.curriculumContext'
+  );
+
+  // 6. Semester Scoped Entries Validation
+  const validateSemesterScopedCollection = (
+    arr: Array<Record<string, unknown>>,
+    collName: string
+  ) => {
+    const seenSemesterPlans = new Set<string>();
+    for (const entry of arr) {
+      if (!entry || typeof entry !== 'object') {
+        throw new Error(`Invalid entry in "${collName}"`);
+      }
+      const spId = entry.semesterPlanId as string;
+      if (!spId || typeof spId !== 'string') {
+        throw new Error(`Entry in "${collName}" missing valid "semesterPlanId"`);
+      }
+      if (!semesterPlanMap.has(spId)) {
+        throw new Error(
+          `Entry in "${collName}" references non-existent semesterPlanId "${spId}"`
+        );
+      }
+      if (seenSemesterPlans.has(spId)) {
+        throw new Error(
+          `Duplicate entry for semesterPlanId "${spId}" in collection "${collName}"`
+        );
+      }
+      seenSemesterPlans.add(spId);
+
+      // Special check for semesterJPSettings inner semesterPlanId
+      if (collName === 'semesterJPSettings' && entry.value && typeof entry.value === 'object') {
+        const valObj = entry.value as Record<string, unknown>;
+        if (valObj.semesterPlanId && valObj.semesterPlanId !== spId) {
+          throw new Error(
+            `semesterJPSettings inner semesterPlanId "${valObj.semesterPlanId}" does not match outer semesterPlanId "${spId}"`
+          );
+        }
+      }
+    }
+  };
+
+  validateSemesterScopedCollection(
+    state.semesterJPSettings as Array<Record<string, unknown>>,
+    'semesterJPSettings'
+  );
+  validateSemesterScopedCollection(
+    semesterData.academicCalendar as Array<Record<string, unknown>>,
+    'semesterData.academicCalendar'
+  );
+  validateSemesterScopedCollection(
+    semesterData.timeAllocation as Array<Record<string, unknown>>,
+    'semesterData.timeAllocation'
+  );
+  validateSemesterScopedCollection(
+    semesterData.learningPlan as Array<Record<string, unknown>>,
+    'semesterData.learningPlan'
+  );
+  validateSemesterScopedCollection(
+    semesterData.assessmentCriteria as Array<Record<string, unknown>>,
+    'semesterData.assessmentCriteria'
+  );
+  validateSemesterScopedCollection(
+    semesterData.assessmentPlan as Array<Record<string, unknown>>,
+    'semesterData.assessmentPlan'
+  );
+  validateSemesterScopedCollection(
+    semesterData.assessmentPackage as Array<Record<string, unknown>>,
+    'semesterData.assessmentPackage'
+  );
+  validateSemesterScopedCollection(
+    semesterData.roster as Array<Record<string, unknown>>,
+    'semesterData.roster'
+  );
+  validateSemesterScopedCollection(
+    semesterData.attendance as Array<Record<string, unknown>>,
+    'semesterData.attendance'
+  );
+  validateSemesterScopedCollection(
+    semesterData.grade as Array<Record<string, unknown>>,
+    'semesterData.grade'
+  );
+  validateSemesterScopedCollection(
+    semesterData.remedial as Array<Record<string, unknown>>,
+    'semesterData.remedial'
+  );
+  validateSemesterScopedCollection(
+    semesterData.enrichment as Array<Record<string, unknown>>,
+    'semesterData.enrichment'
+  );
+
+  // 7. Active Context Pointer Validation
+  if (state.activeProfileId !== undefined && state.activeProfileId !== null) {
+    const actProf = String(state.activeProfileId);
+    if (!profileMap.has(actProf)) {
+      throw new Error(`activeProfileId "${actProf}" references non-existent profile`);
+    }
+  }
+
+  if (state.activeYearPlanId !== undefined && state.activeYearPlanId !== null) {
+    const actYPId = String(state.activeYearPlanId);
+    const actYP = yearPlanMap.get(actYPId);
+    if (!actYP) {
+      throw new Error(`activeYearPlanId "${actYPId}" references non-existent yearPlan`);
+    }
+
+    if (state.activeProfileId) {
+      if (actYP.profileId !== String(state.activeProfileId)) {
+        throw new Error(
+          `activeYearPlanId profileId "${actYP.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
+        );
+      }
+    }
+  }
+
+  if (state.activeSemesterPlanId !== undefined && state.activeSemesterPlanId !== null) {
+    const actSPId = String(state.activeSemesterPlanId);
+    const actSP = semesterPlanMap.get(actSPId);
+    if (!actSP) {
+      throw new Error(`activeSemesterPlanId "${actSPId}" references non-existent semesterPlan`);
+    }
+
+    if (state.activeYearPlanId) {
+      if (actSP.yearPlanId !== String(state.activeYearPlanId)) {
+        throw new Error(
+          `activeSemesterPlanId yearPlanId "${actSP.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
+        );
+      }
+    }
+  }
+
+  if (state.activeWorkspaceId !== undefined && state.activeWorkspaceId !== null) {
+    const actWSId = String(state.activeWorkspaceId);
+    const actWS = workspaceMap.get(actWSId);
+    if (!actWS) {
+      throw new Error(`activeWorkspaceId "${actWSId}" references non-existent workspace`);
+    }
+
+    if (state.activeYearPlanId) {
+      if (actWS.yearPlanId !== String(state.activeYearPlanId)) {
+        throw new Error(
+          `activeWorkspaceId yearPlanId "${actWS.yearPlanId}" mismatch with activeYearPlanId "${state.activeYearPlanId}"`
+        );
+      }
+    }
+
+    if (state.activeProfileId) {
+      if (actWS.profileId !== String(state.activeProfileId)) {
+        throw new Error(
+          `activeWorkspaceId profileId "${actWS.profileId}" mismatch with activeProfileId "${state.activeProfileId}"`
+        );
+      }
+    }
+  }
+
   return value as AppStorageStateV5;
 }
 
@@ -207,20 +567,13 @@ export function validateStorageStateV5(value: unknown): AppStorageStateV5 {
  * Serializes an AppStorageStateV5 into a canonical V5 backup envelope string.
  */
 export function serializeBackupV5(data: AppStorageStateV5): string {
-  if (!data || typeof data !== 'object') {
-    throw new Error('Data state must be a valid object');
-  }
-  if (data.schemaVersion !== 5) {
-    throw new Error(
-      `Invalid schemaVersion: expected 5, received ${String((data as any).schemaVersion)}`
-    );
-  }
+  const validated = validateStorageStateV5(data);
 
   const backup: StorageBackupV5 = {
     app: 'Administrasi Guru AI',
     schemaVersion: 5,
     exportedAt: new Date().toISOString(),
-    data,
+    data: validated,
   };
 
   return JSON.stringify(backup, null, 2);

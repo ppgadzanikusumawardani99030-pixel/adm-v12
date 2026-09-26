@@ -710,6 +710,69 @@ runTest('8. AssessmentPackage Invariant: Complex AssessmentPackage survives inta
   };
 
   const state = createInitialStorageV5();
+  state.profiles.push({
+    id: 'prof-100',
+    name: 'Siti Rahmawati',
+    nip: '198705122011012003',
+    status: 'PNS',
+    defaultSubject: 'Informatika',
+    defaultLevel: 'SMA',
+    schoolId: 'sch-100',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.schools.push({
+    id: 'sch-100',
+    name: 'SMA Negeri 1 Nusantara',
+    npsn: '20101010',
+    address: 'Jl. Merdeka No. 45',
+    village: 'Kalisari',
+    district: 'Pasar Rebo',
+    regency: 'Kota Jakarta Timur',
+    province: 'DKI Jakarta',
+    principalName: 'Dr. H. Ahmad Fauzi',
+    principalNip: '197001011995011001',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.yearPlans.push({
+    id: 'yp-100',
+    profileId: 'prof-100',
+    schoolId: 'sch-100',
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SMA',
+    grade: 'Kelas 10',
+    subject: 'Informatika',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.workspaces.push({
+    id: 'ws-100',
+    profileId: 'prof-100',
+    schoolId: 'sch-100',
+    yearPlanId: 'yp-100',
+    name: 'Informatika Kelas 10',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.semesterPlans.push(
+    {
+      id: 'sp-100',
+      yearPlanId: 'yp-100',
+      semester: 1,
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-10T08:00:00Z',
+    },
+    {
+      id: 'sp-200',
+      yearPlanId: 'yp-100',
+      semester: 2,
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-10T08:00:00Z',
+    }
+  );
+
   state.semesterData.assessmentPackage.push({
     semesterPlanId: 'sp-100',
     value: [sampleAssessmentPackage],

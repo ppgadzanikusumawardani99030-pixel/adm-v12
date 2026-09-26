@@ -714,14 +714,8 @@ runTest('8. Orphan SemesterPlan: Throws when parent YearPlan is missing from sta
     createdAt: '2026-07-01T00:00:00Z',
     updatedAt: '2026-07-01T00:00:00Z',
   });
-  saveStorageV5(state);
-
   assert.throws(
-    () => getSemesterDataV5('sp-orphan-1'),
-    /Parent YearPlan "yp-missing-parent" not found for SemesterPlan "sp-orphan-1"/i
-  );
-  assert.throws(
-    () => saveRosterV5('sp-orphan-1', createSampleRoster()),
+    () => saveStorageV5(state),
     /Parent YearPlan "yp-missing-parent" not found for SemesterPlan "sp-orphan-1"/i
   );
 });

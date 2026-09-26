@@ -103,6 +103,7 @@ runTest('2. Save & Load: State saved to localStorage loads back with exact deep 
         status: 'PNS',
         defaultSubject: 'Matematika',
         defaultLevel: 'SMA',
+        schoolId: 'sch-1',
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
       },
@@ -154,6 +155,13 @@ runTest('2. Save & Load: State saved to localStorage loads back with exact deep 
         id: 'sp-1',
         yearPlanId: 'yp-1',
         semester: 1,
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+      },
+      {
+        id: 'sp-2',
+        yearPlanId: 'yp-1',
+        semester: 2,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
       },
@@ -321,6 +329,18 @@ runTest('5. Reset V5: resetStorageV5 writes and returns canonical empty state', 
   saveStorageV5({
     ...createInitialStorageV5(),
     activeProfileId: 'prof-99',
+    profiles: [
+      {
+        id: 'prof-99',
+        name: 'Guru Test',
+        nip: '12345',
+        status: 'PNS',
+        defaultSubject: 'Math',
+        defaultLevel: 'SMA',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+      },
+    ],
   });
 
   const resetResult = resetStorageV5();
@@ -452,6 +472,69 @@ runTest('7. AssessmentPackage Sentinel: Survives saveStorageV5 -> loadStorageV5 
   };
 
   const state = createInitialStorageV5();
+  state.profiles.push({
+    id: 'prof-1',
+    name: 'Siti Rahmawati',
+    nip: '198705122011012003',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SMA',
+    schoolId: 'sch-1',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.schools.push({
+    id: 'sch-1',
+    name: 'SMA Negeri 1',
+    npsn: '20101010',
+    address: 'Jl. Merdeka No. 45',
+    village: 'Kalisari',
+    district: 'Pasar Rebo',
+    regency: 'Kota Jakarta Timur',
+    province: 'DKI Jakarta',
+    principalName: 'Dr. Ahmad',
+    principalNip: '197001011995011001',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.yearPlans.push({
+    id: 'yp-1',
+    profileId: 'prof-1',
+    schoolId: 'sch-1',
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SMA',
+    grade: 'Kelas 10',
+    subject: 'Matematika',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.workspaces.push({
+    id: 'ws-1',
+    profileId: 'prof-1',
+    schoolId: 'sch-1',
+    yearPlanId: 'yp-1',
+    name: 'Matematika Kelas 10',
+    createdAt: '2026-07-10T08:00:00Z',
+    updatedAt: '2026-07-10T08:00:00Z',
+  });
+  state.semesterPlans.push(
+    {
+      id: 'sp-1',
+      yearPlanId: 'yp-1',
+      semester: 1,
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-10T08:00:00Z',
+    },
+    {
+      id: 'sp-2',
+      yearPlanId: 'yp-1',
+      semester: 2,
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-10T08:00:00Z',
+    }
+  );
+
   state.semesterData.assessmentPackage.push({
     semesterPlanId: 'sp-1',
     value: [complexPackage],
