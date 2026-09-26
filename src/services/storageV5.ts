@@ -3,14 +3,31 @@ import {
   StorageBackupV5,
   STORAGE_KEY_V5,
   AdministrationWorkspaceV5,
+  YearScopedEntry,
 } from '../types/storageV5';
 import {
   YearPlan,
   SemesterPlan,
   CurriculumType,
+  CPData,
+  CPAnalysisData,
+  TPData,
+  ATPData,
+  CurriculumContextLock,
+  AnnualJPReference,
 } from '../types';
 
 export { STORAGE_KEY_V5 };
+
+export interface AnnualDataV5Result {
+  yearPlan: YearPlan;
+  cp: CPData | undefined;
+  cpAnalysis: CPAnalysisData | undefined;
+  tp: TPData | undefined;
+  atp: ATPData | undefined;
+  curriculumContext: CurriculumContextLock | undefined;
+  annualJPReference: AnnualJPReference | undefined;
+}
 
 export interface CreateYearHierarchyV5Params {
   profileId: string;
@@ -513,3 +530,193 @@ export function renameWorkspaceV5(workspaceId: string, name: string): void {
 
   saveStorageV5(state);
 }
+
+/**
+ * Asserts that a YearPlan exists in the state and returns it.
+ */
+function assertYearPlanExists(state: AppStorageStateV5, yearPlanId: string): YearPlan {
+  const yearPlan = state.yearPlans.find((yp) => yp.id === yearPlanId);
+  if (!yearPlan) {
+    throw new Error(`YearPlan with ID "${yearPlanId}" not found`);
+  }
+  return yearPlan;
+}
+
+/**
+ * Upserts a YearScopedEntry into an annual collection.
+ * Replaces value if entry already exists, or inserts a new entry if not.
+ * Ensures exactly 1 wrapper per yearPlanId.
+ */
+function upsertAnnualScopedEntry<T>(
+  collection: YearScopedEntry<T>[],
+  yearPlanId: string,
+  value: T
+): T {
+  const existing = collection.find((entry) => entry.yearPlanId === yearPlanId);
+  if (existing) {
+    existing.value = value;
+  } else {
+    collection.push({ yearPlanId, value });
+  }
+  return value;
+}
+
+/**
+ * Removes a YearScopedEntry from an annual collection.
+ * Returns true if an entry was removed, false if not found.
+ */
+function deleteAnnualScopedEntry<T>(
+  collection: YearScopedEntry<T>[],
+  yearPlanId: string
+): boolean {
+  const index = collection.findIndex((entry) => entry.yearPlanId === yearPlanId);
+  if (index !== -1) {
+    collection.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Retrieves all annual scoped domain data for a given YearPlan.
+ *
+ * Rules:
+ * - Validates that YearPlan exists (throws if not found)
+ * - Returns { yearPlan, cp, cpAnalysis, tp, atp, curriculumContext, annualJPReference }
+ * - Unpopulated collections return undefined
+ * - Does not fallback to activeYearPlanId or other YearPlans
+ */
+export function getAnnualDataV5(yearPlanId: string): AnnualDataV5Result {
+  const state = loadStorageV5();
+  const yearPlan = assertYearPlanExists(state, yearPlanId);
+
+  const cp = state.annualData.cp.find((e) => e.yearPlanId === yearPlanId)?.value;
+  const cpAnalysis = state.annualData.cpAnalysis.find((e) => e.yearPlanId === yearPlanId)?.value;
+  const tp = state.annualData.tp.find((e) => e.yearPlanId === yearPlanId)?.value;
+  const atp = state.annualData.atp.find((e) => e.yearPlanId === yearPlanId)?.value;
+  const curriculumContext = state.annualData.curriculumContext.find(
+    (e) => e.yearPlanId === yearPlanId
+  )?.value;
+  const annualJPReference = state.annualJPReferences.find(
+    (e) => e.yearPlanId === yearPlanId
+  )?.value;
+
+  return {
+    yearPlan,
+    cp,
+    cpAnalysis,
+    tp,
+    atp,
+    curriculumContext,
+    annualJPReference,
+  };
+}
+
+export function saveCPV5(yearPlanId: string, value: CPData): CPData {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualData.cp, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveCPAnalysisV5(yearPlanId: string, value: CPAnalysisData): CPAnalysisData {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualData.cpAnalysis, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveTPV5(yearPlanId: string, value: TPData): TPData {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualData.tp, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveATPV5(yearPlanId: string, value: ATPData): ATPData {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualData.atp, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveCurriculumContextV5(
+  yearPlanId: string,
+  value: CurriculumContextLock
+): CurriculumContextLock {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualData.curriculumContext, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function saveAnnualJPReferenceV5(
+  yearPlanId: string,
+  value: AnnualJPReference
+): AnnualJPReference {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  upsertAnnualScopedEntry(state.annualJPReferences, yearPlanId, value);
+  saveStorageV5(state);
+  return value;
+}
+
+export function deleteCPV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualData.cp, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteCPAnalysisV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualData.cpAnalysis, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteTPV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualData.tp, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteATPV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualData.atp, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteCurriculumContextV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualData.curriculumContext, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
+export function deleteAnnualJPReferenceV5(yearPlanId: string): void {
+  const state = loadStorageV5();
+  assertYearPlanExists(state, yearPlanId);
+  const changed = deleteAnnualScopedEntry(state.annualJPReferences, yearPlanId);
+  if (changed) {
+    saveStorageV5(state);
+  }
+}
+
